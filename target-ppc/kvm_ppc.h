@@ -55,6 +55,7 @@ void kvmppc_hash64_write_pte(CPUPPCState *env, target_ulong pte_index,
                              target_ulong pte0, target_ulong pte1);
 bool kvmppc_has_cap_fixup_hcalls(void);
 int kvmppc_enable_hwrng(void);
+PowerPCCPUClass *kvm_ppc_get_host_cpu_class(void);
 
 #else
 
@@ -256,6 +257,12 @@ static inline int kvmppc_enable_hwrng(void)
 {
     return -1;
 }
+
+static inline PowerPCCPUClass *kvm_ppc_get_host_cpu_class(void)
+{
+    return NULL;
+}
+
 #endif
 
 #ifndef CONFIG_KVM
