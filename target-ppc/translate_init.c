@@ -9191,35 +9191,45 @@ int ppc_get_compat_smt_threads(PowerPCCPU *cpu)
     return ret;
 }
 
+#ifdef TARGET_PPC64
 int ppc_set_compat(PowerPCCPU *cpu, uint32_t cpu_version)
 {
     int ret = 0;
     CPUPPCState *env = &cpu->env;
+    PowerPCCPUClass *host_pcc;
 
     cpu->cpu_version = cpu_version;
 
     switch (cpu_version) {
     case CPU_POWERPC_LOGICAL_2_05:
-        env->spr[SPR_PCR] = PCR_COMPAT_2_05;
+        env->spr[SPR_PCR] = PCR_TM_DIS | PCR_VSX_DIS | PCR_COMPAT_2_07 |
+                            PCR_COMPAT_2_06 | PCR_COMPAT_2_05;
         break;
     case CPU_POWERPC_LOGICAL_2_06:
-        env->spr[SPR_PCR] = PCR_COMPAT_2_06;
-        break;
     case CPU_POWERPC_LOGICAL_2_06_PLUS:
-        env->spr[SPR_PCR] = PCR_COMPAT_2_06;
+        env->spr[SPR_PCR] = PCR_TM_DIS | PCR_COMPAT_2_07 | PCR_COMPAT_2_06;
         break;
     default:
         env->spr[SPR_PCR] = 0;
         break;
     }
 
-    if (kvm_enabled() && kvmppc_set_compat(cpu, cpu->cpu_version) < 0) {
-        error_report("Unable to set compatibility mode in KVM");
-        ret = -1;
+    host_pcc = kvm_ppc_get_host_cpu_class();
+    if (host_pcc) {
+        env->spr[SPR_PCR] &= host_pcc->pcr_mask;
+    }
+
+    if (kvm_enabled()) {
+        ret = kvmppc_set_compat(cpu, cpu->cpu_version);
+        if (ret < 0) {
+            error_report("Unable to set compatibility mode in KVM");
+            ret = -1;
+        }
     }
 
     return ret;
 }
+#endif
 
 static gint ppc_cpu_compare_class_pvr(gconstpointer a, gconstpointer b)
 {
