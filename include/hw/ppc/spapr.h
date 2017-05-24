@@ -20,6 +20,7 @@ typedef struct sPAPREventSource sPAPREventSource;
 
 #define SPAPR_TIMEBASE_FREQ     512000000ULL
 
+typedef struct sPAPRDIMMState sPAPRDIMMState;
 typedef struct sPAPRMachineClass sPAPRMachineClass;
 
 #define TYPE_SPAPR_MACHINE      "spapr-machine"
@@ -91,6 +92,11 @@ struct sPAPRMachineState {
 
     /* RTAS state */
     QTAILQ_HEAD(, sPAPRConfigureConnectorState) ccs_list;
+
+    /* Pending DIMM unplug cache. It is populated when a LMB
+     * unplug starts. It can be regenerated if a migration
+     * occurs during the unplug process. */
+    QTAILQ_HEAD(, sPAPRDIMMState) pending_dimm_unplugs;
 
     /*< public >*/
     char *kvm_type;
