@@ -2516,6 +2516,12 @@ subsystem image.
 The ``convert -s snapshot_id_or_name'' argument is obsoleted
 by the ``convert -l snapshot_param'' argument instead.
 
+@section System emulator machine protocol commands
+
+@subsection qmp_cpu (since 2.12.0)
+
+The ``qmp_cpu'' command is deprecated. Do not use this command.
+
 @section System emulator human monitor commands
 
 @subsection host_net_add (since 2.10.0)
