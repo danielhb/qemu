@@ -547,6 +547,7 @@ static int parse_numa(void *opaque, QemuOpts *opts, Error **errp)
  */
 static void validate_numa_distance(MachineState *ms)
 {
+    MachineClass *mc = MACHINE_GET_CLASS(ms);
     int src, dst;
     bool is_asymmetrical = false;
     int nb_numa_nodes = ms->numa_state->num_nodes;
@@ -575,6 +576,12 @@ static void validate_numa_distance(MachineState *ms)
     }
 
     if (is_asymmetrical) {
+        if (mc->forbid_asymmetrical_numa) {
+            error_report("This machine type does not support "
+                         "asymmetrical numa distances.");
+            exit(EXIT_FAILURE);
+        }
+
         for (src = 0; src < nb_numa_nodes; src++) {
             for (dst = 0; dst < nb_numa_nodes; dst++) {
                 if (src != dst && numa_info[src].distance[dst] == 0) {
