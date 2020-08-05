@@ -129,6 +129,8 @@ struct SpaprPhbState {
 #define SPAPR_PCI_NV2ATSD_WIN_SIZE   (NVGPU_MAX_NUM * NVGPU_MAX_LINKS * \
                                       64 * KiB)
 
+unsigned spapr_pci_get_available_numa_id(Error **errp);
+
 int spapr_dt_phb(SpaprMachineState *spapr, SpaprPhbState *phb,
                  uint32_t intc_phandle, void *fdt, int *node_offset);
 
