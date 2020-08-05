@@ -227,7 +227,9 @@ struct SpaprMachineState {
     bool cmd_line_caps[SPAPR_CAP_NUM];
     SpaprCapabilities def, eff, mig;
 
-    unsigned gpu_numa_id;
+    unsigned current_numa_id;
+    unsigned extra_numa_nodes;
+
     SpaprTpmProxy *tpm_proxy;
 
     Error *fwnmi_migration_blocker;

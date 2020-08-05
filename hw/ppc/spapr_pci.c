@@ -2494,3 +2494,36 @@ void spapr_pci_switch_vga(bool big_endian)
                            &big_endian);
     }
 }
+
+unsigned spapr_pci_get_available_numa_id(Error **errp)
+{
+    MachineState *machine = MACHINE(qdev_get_machine());
+    SpaprMachineState *spapr = SPAPR_MACHINE(machine);
+    NodeInfo *numa_info = machine->numa_state->nodes;
+    unsigned i, start;
+
+    if (machine->numa_state->num_nodes + spapr->extra_numa_nodes >= MAX_NODES) {
+        error_setg(errp,
+                   "Unable to get an extra NUMA node beyond MAX_NODES = %d",
+                   MAX_NODES);
+        return spapr->current_numa_id;
+    }
+
+    if (spapr->extra_numa_nodes == 0) {
+        start = 0;
+    } else {
+        start = spapr->current_numa_id + 1;
+    }
+
+    for (i = start; i < MAX_NODES; i++) {
+        if (!numa_info[i].present) {
+            spapr->extra_numa_nodes++;
+            spapr->current_numa_id = i;
+            return i;
+        }
+    }
+
+    error_setg(errp, "Unable to find a valid NUMA id");
+
+    return spapr->current_numa_id;
+}
