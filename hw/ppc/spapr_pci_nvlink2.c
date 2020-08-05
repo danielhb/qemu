@@ -87,9 +87,8 @@ static void spapr_pci_collect_nvgpu(SpaprPhbPciNvGpuConfig *nvgpus,
                                     PCIDevice *pdev, uint64_t tgt,
                                     MemoryRegion *mr, Error **errp)
 {
-    MachineState *machine = MACHINE(qdev_get_machine());
-    SpaprMachineState *spapr = SPAPR_MACHINE(machine);
     SpaprPhbPciNvGpuSlot *nvslot = spapr_nvgpu_get_slot(nvgpus, tgt);
+    Error *local_err = NULL;
 
     if (!nvslot) {
         error_setg(errp, "Found too many GPUs per vPHB");
@@ -100,8 +99,11 @@ static void spapr_pci_collect_nvgpu(SpaprPhbPciNvGpuConfig *nvgpus,
 
     nvslot->gpa = nvgpus->nv2_ram_current;
     nvgpus->nv2_ram_current += memory_region_size(mr);
-    nvslot->numa_id = spapr->gpu_numa_id;
-    ++spapr->gpu_numa_id;
+
+    nvslot->numa_id = spapr_pci_get_available_numa_id(&local_err);
+    if (local_err) {
+        error_propagate(errp, local_err);
+    }
 }
 
 static void spapr_pci_collect_nvnpu(SpaprPhbPciNvGpuConfig *nvgpus,
