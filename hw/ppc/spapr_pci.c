@@ -2357,7 +2357,9 @@ int spapr_dt_phb(SpaprMachineState *spapr, SpaprPhbState *phb,
 
     /* Advertise NUMA via ibm,associativity */
     if (phb->numa_node != -1) {
-        int len = spapr_set_associativity(associativity, phb->numa_node, -1);
+        MachineState *machine = MACHINE(spapr);
+        int len = spapr_set_associativity(associativity, phb->numa_node, -1,
+                                          machine);
         _FDT(fdt_setprop(fdt, bus_off, "ibm,associativity", associativity, len));
     }
 

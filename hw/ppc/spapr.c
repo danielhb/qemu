@@ -208,8 +208,13 @@ static int spapr_fixup_cpu_smt_dt(void *fdt, int offset, PowerPCCPU *cpu,
     return ret;
 }
 
-int spapr_set_associativity(uint32_t *assoc, int node_id, int cpu_index)
+int spapr_set_associativity(uint32_t *assoc, int node_id, int cpu_index,
+                            MachineState *machine)
 {
+    SpaprMachineClass *smc = SPAPR_MACHINE_GET_CLASS(machine);
+    uint8_t assoc_domain1 = smc->numa_assoc_domains[node_id][0];
+    uint8_t assoc_domain2 = smc->numa_assoc_domains[node_id][1];
+    uint8_t assoc_domain3 = smc->numa_assoc_domains[node_id][2];
     uint8_t assoc_size = 0x4;
 
     if (cpu_index > 0) {
@@ -221,23 +226,63 @@ int spapr_set_associativity(uint32_t *assoc, int node_id, int cpu_index)
     assoc = g_new0(uint32_t, assoc_size + 1);
 
     assoc[0] = cpu_to_be32(assoc_size);
-    assoc[1] = cpu_to_be32(0x0);
-    assoc[2] = cpu_to_be32(0x0);
-    assoc[3] = cpu_to_be32(0x0);
+    assoc[1] = cpu_to_be32(assoc_domain1);
+    assoc[2] = cpu_to_be32(assoc_domain2);
+    assoc[3] = cpu_to_be32(assoc_domain3);
     assoc[4] = cpu_to_be32(node_id);
 
     if (assoc_size == 0x5) {
         assoc[5] = cpu_to_be32(cpu_index);
     }
 
+    if (smc->pre_5_2_numa_associativity) {
+        assoc[1] = 0x0;
+        assoc[2] = 0x0;
+        assoc[3] = 0x0;
+    }
+
     return sizeof(assoc);
 }
 
-static int spapr_fixup_cpu_numa_dt(void *fdt, int offset, PowerPCCPU *cpu)
+static void spapr_init_numa_assoc_domains(MachineState *machine)
+{
+    SpaprMachineClass *smc = SPAPR_MACHINE_GET_CLASS(machine);
+    int nb_numa_nodes = machine->numa_state->num_nodes;
+    NodeInfo *numa_info = machine->numa_state->nodes;
+    uint8_t existing_nodes[nb_numa_nodes];
+    int i, src_node, index = 0;
+
+    /* We will assume that the NUMA nodes might be sparsed. This
+     * preliminary fetch step is required to avoid having to search
+     * for an existing NUMA node more than once. */
+    for (i = 0; i < MAX_NODES; i++) {
+        if (numa_info[i].present) {
+            existing_nodes[index++] = i;
+            if (index == nb_numa_nodes) {
+                break;
+            }
+        }
+    }
+
+    /* Start iterating through the existing numa nodes to
+     * define associativity groups */
+    for (i = 0; i < nb_numa_nodes; i++) {
+        src_node = existing_nodes[i];
+
+        /* the forth associativity domain is always the node_id */
+        smc->numa_assoc_domains[src_node][3] = src_node;
+
+        /* More to come soon ... */
+    }
+}
+
+static int spapr_fixup_cpu_numa_dt(void *fdt, int offset, PowerPCCPU *cpu,
+                                   MachineState *machine)
 {
     int index = spapr_get_vcpu_id(cpu);
     g_autofree uint32_t *associativity = NULL;
-    int len = spapr_set_associativity(associativity, cpu->node_id, index);
+    int len = spapr_set_associativity(associativity, cpu->node_id, index,
+                                      machine);
 
     /* Advertise NUMA via ibm,associativity */
     return fdt_setprop(fdt, offset, "ibm,associativity", associativity, len);
@@ -341,10 +386,10 @@ static void add_str(GString *s, const gchar *s1)
 }
 
 static int spapr_dt_memory_node(void *fdt, int nodeid, hwaddr start,
-                                hwaddr size)
+                                hwaddr size, MachineState *machine)
 {
     g_autofree uint32_t *associativity = NULL;
-    int len = spapr_set_associativity(associativity, nodeid, -1);
+    int len = spapr_set_associativity(associativity, nodeid, -1, machine);
 
     char mem_name[32];
     uint64_t mem_reg_property[2];
@@ -633,7 +678,7 @@ static int spapr_dt_dynamic_reconfiguration_memory(SpaprMachineState *spapr,
     cur_index += 2;
     for (i = 0; i < nr_nodes; i++) {
         g_autofree uint32_t *associativity = NULL;
-        int len = spapr_set_associativity(associativity, i, -1);
+        int len = spapr_set_associativity(associativity, i, -1, machine);
         memcpy(cur_index, associativity, len);
         cur_index += 4;
     }
@@ -667,7 +712,7 @@ static int spapr_dt_memory(SpaprMachineState *spapr, void *fdt)
         if (!mem_start) {
             /* spapr_machine_init() checks for rma_size <= node0_size
              * already */
-            spapr_dt_memory_node(fdt, i, 0, spapr->rma_size);
+            spapr_dt_memory_node(fdt, i, 0, spapr->rma_size, machine);
             mem_start += spapr->rma_size;
             node_size -= spapr->rma_size;
         }
@@ -679,7 +724,7 @@ static int spapr_dt_memory(SpaprMachineState *spapr, void *fdt)
                 sizetmp = 1ULL << ctzl(mem_start);
             }
 
-            spapr_dt_memory_node(fdt, i, mem_start, sizetmp);
+            spapr_dt_memory_node(fdt, i, mem_start, sizetmp, machine);
             node_size -= sizetmp;
             mem_start += sizetmp;
         }
@@ -809,7 +854,7 @@ static void spapr_dt_cpu(CPUState *cs, void *fdt, int offset,
                       pft_size_prop, sizeof(pft_size_prop))));
 
     if (ms->numa_state->num_nodes > 1) {
-        _FDT(spapr_fixup_cpu_numa_dt(fdt, offset, cpu));
+        _FDT(spapr_fixup_cpu_numa_dt(fdt, offset, cpu, ms));
     }
 
     _FDT(spapr_fixup_cpu_smt_dt(fdt, offset, cpu, compat_smt));
@@ -836,6 +881,7 @@ static void spapr_dt_cpu(CPUState *cs, void *fdt, int offset,
 
 static void spapr_dt_cpus(void *fdt, SpaprMachineState *spapr)
 {
+    MachineState *machine = MACHINE(spapr);
     CPUState **rev;
     CPUState *cs;
     int n_cpus;
@@ -861,6 +907,10 @@ static void spapr_dt_cpus(void *fdt, SpaprMachineState *spapr)
     CPU_FOREACH(cs) {
         rev = g_renew(CPUState *, rev, n_cpus + 1);
         rev[n_cpus++] = cs;
+    }
+
+    if (machine->numa_state->num_nodes > 1) {
+        spapr_init_numa_assoc_domains(machine);
     }
 
     for (i = n_cpus - 1; i >= 0; i--) {
@@ -1334,7 +1384,7 @@ void *spapr_build_fdt(SpaprMachineState *spapr, bool reset, size_t space)
 
     /* NVDIMM devices */
     if (mc->nvdimm_supported) {
-        spapr_dt_persistent_memory(fdt);
+        spapr_dt_persistent_memory(fdt, machine);
     }
 
     return fdt;
@@ -3452,6 +3502,7 @@ static void spapr_nmi(NMIState *n, int cpu_index, Error **errp)
 int spapr_lmb_dt_populate(SpaprDrc *drc, SpaprMachineState *spapr,
                           void *fdt, int *fdt_start_offset, Error **errp)
 {
+    MachineState *machine = MACHINE(spapr);
     uint64_t addr;
     uint32_t node;
 
@@ -3459,7 +3510,8 @@ int spapr_lmb_dt_populate(SpaprDrc *drc, SpaprMachineState *spapr,
     node = object_property_get_uint(OBJECT(drc->dev), PC_DIMM_NODE_PROP,
                                     &error_abort);
     *fdt_start_offset = spapr_dt_memory_node(fdt, node, addr,
-                                             SPAPR_MEMORY_BLOCK_SIZE);
+                                             SPAPR_MEMORY_BLOCK_SIZE,
+                                             machine);
     return 0;
 }
 

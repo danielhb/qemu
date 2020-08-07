@@ -104,6 +104,9 @@ typedef enum {
 
 #define FDT_MAX_SIZE                    0x100000
 
+/* Taken from Linux kernel arch/powerpc/mm/numa.h */
+#define MAX_DISTANCE_REF_POINTS         4
+
 typedef struct SpaprCapabilities SpaprCapabilities;
 struct SpaprCapabilities {
     uint8_t caps[SPAPR_CAP_NUM];
@@ -131,6 +134,7 @@ struct SpaprMachineClass {
     hwaddr rma_limit;          /* clamp the RMA to this size */
     bool pre_5_1_assoc_refpoints;
     bool pre_5_2_numa_associativity;
+    uint8_t numa_assoc_domains[MAX_NODES][MAX_DISTANCE_REF_POINTS];
 
     void (*phb_placement)(SpaprMachineState *spapr, uint32_t index,
                           uint64_t *buid, hwaddr *pio,
@@ -862,7 +866,8 @@ int spapr_phb_dt_populate(SpaprDrc *drc, SpaprMachineState *spapr,
 
 void spapr_rtc_read(SpaprRtcState *rtc, struct tm *tm, uint32_t *ns);
 int spapr_rtc_import_offset(SpaprRtcState *rtc, int64_t legacy_offset);
-int spapr_set_associativity(uint32_t *assoc, int node_id, int cpu_index);
+int spapr_set_associativity(uint32_t *assoc, int node_id, int cpu_index,
+                            MachineState *machine);
 
 #define TYPE_SPAPR_RNG "spapr-rng"
 
