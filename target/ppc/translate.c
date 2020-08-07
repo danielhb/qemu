@@ -2701,6 +2701,7 @@ static void gen_darn(DisasContext *ctx)
         }
     }
 }
+
 #endif
 
 /***                             Integer rotate                            ***/
@@ -4711,6 +4712,29 @@ static void gen_rfscv(DisasContext *ctx)
     ctx->base.is_jmp = DISAS_EXIT;
 #endif
 }
+#endif
+
+#if 0
+#if !defined(CONFIG_USER_ONLY)
+static void gen_rfebb(DisasContext *ctx)
+{
+    TCGv_i32 tmp_s;
+    uint32_t s = !!(ctx->opcode & 0x800);
+
+#if defined(CONFIG_USER_ONLY)
+    GEN_PRIV;
+#else
+    gen_icount_io_start(ctx);
+    gen_update_cfar(ctx, ctx->cia);
+
+    tmp_s = tcg_const_i32(s);
+    gen_helper_rfebb(cpu_env, tmp_s);
+    tcg_temp_free_i32(tmp_s);
+
+    ctx->base.is_jmp = DISAS_EXIT;
+#endif
+}
+#endif
 #endif
 
 static void gen_hrfid(DisasContext *ctx)

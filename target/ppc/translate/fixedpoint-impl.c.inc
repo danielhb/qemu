@@ -331,3 +331,16 @@ static bool trans_CFUGED(DisasContext *ctx, arg_X *a)
 #endif
     return true;
 }
+
+static bool trans_RFEBB(DisasContext *ctx, arg_RFEBB *arg)
+{
+    REQUIRE_INSNS_FLAGS2(ctx, ISA207S);
+
+    gen_icount_io_start(ctx);
+    gen_update_cfar(ctx, ctx->cia);
+    gen_helper_rfebb(cpu_env, cpu_gpr[arg->s]);
+
+    ctx->base.is_jmp = DISAS_EXIT;
+
+    return true;
+}
