@@ -915,13 +915,20 @@ static void spapr_dt_rtas(SpaprMachineState *spapr, void *fdt)
         0, cpu_to_be32(SPAPR_MEMORY_BLOCK_SIZE),
         cpu_to_be32(ms->smp.max_cpus / ms->smp.threads),
     };
-    uint32_t maxdomain = cpu_to_be32(spapr->extra_numa_nodes > 1 ? 1 : 0);
+
+    /* The maximum domains for a given NUMA level, supposing that every
+     * additional NUMA node belongs to the same domain (aside from the
+     * 4th level, where we must support all available NUMA domains), is
+     * total number of domains - 1. */
+    uint32_t total_nodes_number = ms->numa_state->num_nodes +
+                                  spapr->extra_numa_nodes;
+    uint32_t maxdomain = cpu_to_be32(total_nodes_number -1 );
     uint32_t maxdomains[] = {
         cpu_to_be32(4),
         maxdomain,
         maxdomain,
         maxdomain,
-        cpu_to_be32(ms->numa_state->num_nodes + spapr->extra_numa_nodes),
+        cpu_to_be32(total_nodes_number),
     };
 
     _FDT(rtas = fdt_add_subnode(fdt, 0, "rtas"));
@@ -957,6 +964,13 @@ static void spapr_dt_rtas(SpaprMachineState *spapr, void *fdt)
     _FDT(fdt_setprop(fdt, rtas, "qemu,hypertas-functions",
                      qemu_hypertas->str, qemu_hypertas->len));
     g_string_free(qemu_hypertas, TRUE);
+
+    if (smc->pre_5_2_numa_associativity) {
+        maxdomain = cpu_to_be32(spapr->extra_numa_nodes > 1 ? 1 : 0);
+        maxdomains[1] = maxdomain;
+        maxdomains[2] = maxdomain;
+        maxdomains[3] = maxdomain;
+    }
 
     if (smc->pre_5_1_assoc_refpoints) {
         nr_refpoints = 2;
@@ -4607,8 +4621,11 @@ DEFINE_SPAPR_MACHINE(5_2, "5.2", true);
  */
 static void spapr_machine_5_1_class_options(MachineClass *mc)
 {
+    SpaprMachineClass *smc = SPAPR_MACHINE_CLASS(mc);
+
     spapr_machine_5_2_class_options(mc);
     compat_props_add(mc->compat_props, hw_compat_5_1, hw_compat_5_1_len);
+    smc->pre_5_2_numa_associativity = true;
 }
 
 DEFINE_SPAPR_MACHINE(5_1, "5.1", false);
