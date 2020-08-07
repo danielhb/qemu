@@ -906,8 +906,9 @@ static void spapr_dt_rtas(SpaprMachineState *spapr, void *fdt)
     GString *qemu_hypertas = g_string_sized_new(256);
     uint32_t refpoints[] = {
         cpu_to_be32(0x4),
-        cpu_to_be32(0x4),
+        cpu_to_be32(0x3),
         cpu_to_be32(0x2),
+        cpu_to_be32(0x1),
     };
     uint32_t nr_refpoints = ARRAY_SIZE(refpoints);
     uint64_t max_device_addr = MACHINE(spapr)->device_memory->base +
@@ -970,6 +971,10 @@ static void spapr_dt_rtas(SpaprMachineState *spapr, void *fdt)
     g_string_free(qemu_hypertas, TRUE);
 
     if (spapr_machine_using_legacy_numa(spapr)) {
+        refpoints[1] = cpu_to_be32(0x4);
+        refpoints[2] = cpu_to_be32(0x2);
+        nr_refpoints = 3;
+
         maxdomain = cpu_to_be32(spapr->extra_numa_nodes > 1 ? 1 : 0);
         maxdomains[1] = maxdomain;
         maxdomains[2] = maxdomain;
