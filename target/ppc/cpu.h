@@ -342,6 +342,13 @@ typedef struct ppc_v3_pate_t {
 #define MSR_RI   1  /* Recoverable interrupt                        1        */
 #define MSR_LE   0  /* Little-endian mode                           1 hflags */
 
+/* EBB/BESCR bits */
+#define BESCR_GE PPC_BIT(0)    /* Global Enable                                      */
+#define BESCR_EE PPC_BIT(30)   /* External Event-based Exception Enable              */
+#define BESCR_PME PPC_BIT(31)  /* Performance Monitor Event-based Exception Enable   */
+#define BESCR_EEO PPC_BIT(62)  /* External Event-based Exception Occurred            */
+#define BESCR_PMEO PPC_BIT(63) /* Performance Monitor Event-based Exception Occurred */
+
 /* LPCR bits */
 #define LPCR_VPM0         PPC_BIT(0)
 #define LPCR_VPM1         PPC_BIT(1)
