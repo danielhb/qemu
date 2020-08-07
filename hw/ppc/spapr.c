@@ -109,7 +109,7 @@
 /* Mapping between associativity reference points and the NUMA distance
  * seem by the guest, as defined by the pSeries kernel */
 #define NUMA_LEVEL_1            10
-#define NUMA_LEVEL_2            20
+#define NUMA_LEVEL_2_START      11
 #define NUMA_LEVEL_3            40
 #define NUMA_LEVEL_4            80
 
@@ -244,13 +244,42 @@ int spapr_set_associativity(uint32_t *assoc, int node_id, int cpu_index,
     return sizeof(assoc);
 }
 
+static void spapr_numa_assoc_assign_domain(SpaprMachineClass *smc,
+		                           uint8_t nodeA, uint8_t nodeB,
+		                           uint8_t numaLevel,
+					   uint8_t curr_domain)
+{
+    uint8_t assoc_A, assoc_B;
+
+    assoc_A = smc->numa_assoc_domains[nodeA][numaLevel];
+    assoc_B = smc->numa_assoc_domains[nodeB][numaLevel];
+
+    // No associativity domains on both. Assign and move on
+    if ((assoc_A | assoc_B) == 0) {
+	smc->numa_assoc_domains[nodeB][numaLevel] = curr_domain;
+        smc->numa_assoc_domains[nodeB][numaLevel] = curr_domain;
+	return;
+    }
+
+    // Use the existing assoc domain of any of the nodes to not
+    // disrupt previous associations already defined
+    if (assoc_A != 0) {
+        smc->numa_assoc_domains[nodeB][numaLevel] = assoc_A;
+    } else {
+        smc->numa_assoc_domains[nodeA][numaLevel] = assoc_B;
+    }
+}
+
 static void spapr_init_numa_assoc_domains(MachineState *machine)
 {
     SpaprMachineClass *smc = SPAPR_MACHINE_GET_CLASS(machine);
     int nb_numa_nodes = machine->numa_state->num_nodes;
     NodeInfo *numa_info = machine->numa_state->nodes;
     uint8_t existing_nodes[nb_numa_nodes];
-    int i, src_node, index = 0;
+    int i, j, src_node, dst_node, index = 0;
+   // uint32_t total_nodes_number = ms->numa_state->num_nodes +
+     //                             spapr->extra_numa_nodes;
+    uint8_t assoc_domain = 1;
 
     /* We will assume that the NUMA nodes might be sparsed. This
      * preliminary fetch step is required to avoid having to search
@@ -267,12 +296,45 @@ static void spapr_init_numa_assoc_domains(MachineState *machine)
     /* Start iterating through the existing numa nodes to
      * define associativity groups */
     for (i = 0; i < nb_numa_nodes; i++) {
+        uint8_t distance = 20;
+        uint8_t lower_end = 10;
+        uint8_t upper_end = 0;
+
         src_node = existing_nodes[i];
 
         /* the forth associativity domain is always the node_id */
         smc->numa_assoc_domains[src_node][3] = src_node;
 
-        /* More to come soon ... */
+        /* Calculate all associativity domains src_node belongs to. */
+        for(index = 0; index < 3; index++) {
+            upper_end = distance/2 + distance;
+
+            for(j = i + 1; j < nb_numa_nodes; j++) {
+                uint8_t node_dist;
+
+                dst_node = existing_nodes[j];
+                node_dist = numa_info[src_node].distance[dst_node];
+
+                if (node_dist > lower_end && node_dist <= upper_end) {
+                    spapr_numa_assoc_assign_domain(smc, src_node, dst_node,
+                                                   2 - index, assoc_domain);
+                                                   assoc_domain++;
+                }
+            }
+
+            lower_end = upper_end;
+            distance *= 2;
+        }
+    }
+
+    for (i = 0; i < nb_numa_nodes; i++) {
+        src_node = existing_nodes[i];
+        for (j = 0; j < 3; j++) {
+            if (smc->numa_assoc_domains[src_node][j] == 0) {
+                smc->numa_assoc_domains[src_node][j] = assoc_domain;
+                assoc_domain++;
+            }
+        }
     }
 }
 
