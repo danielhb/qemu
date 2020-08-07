@@ -87,8 +87,9 @@ int spapr_pmem_dt_populate(SpaprDrc *drc, SpaprMachineState *spapr,
                            void *fdt, int *fdt_start_offset, Error **errp)
 {
     NVDIMMDevice *nvdimm = NVDIMM(drc->dev);
+    MachineState *machine = MACHINE(spapr);
 
-    *fdt_start_offset = spapr_dt_nvdimm(fdt, 0, nvdimm);
+    *fdt_start_offset = spapr_dt_nvdimm(fdt, 0, nvdimm, machine);
 
     return 0;
 }
@@ -104,8 +105,8 @@ void spapr_create_nvdimm_dr_connectors(SpaprMachineState *spapr)
 }
 
 
-int spapr_dt_nvdimm(void *fdt, int parent_offset,
-                           NVDIMMDevice *nvdimm)
+int spapr_dt_nvdimm(void *fdt, int parent_offset, NVDIMMDevice *nvdimm,
+                    MachineState *machine)
 {
     int child_offset;
     char *buf;
@@ -120,7 +121,7 @@ int spapr_dt_nvdimm(void *fdt, int parent_offset,
     uint64_t size = object_property_get_int(OBJECT(nvdimm), PC_DIMM_SIZE_PROP,
                                             NULL);
 
-    spapr_set_associativity(associativity, node, -1);
+    spapr_set_associativity(associativity, node, -1, machine);
 
     drc = spapr_drc_by_id(TYPE_SPAPR_DRC_PMEM, slot);
     g_assert(drc);
@@ -159,7 +160,7 @@ int spapr_dt_nvdimm(void *fdt, int parent_offset,
     return child_offset;
 }
 
-void spapr_dt_persistent_memory(void *fdt)
+void spapr_dt_persistent_memory(void *fdt, MachineState *machine)
 {
     int offset = fdt_subnode_offset(fdt, 0, "persistent-memory");
     GSList *iter, *nvdimms = nvdimm_get_device_list();
@@ -177,7 +178,7 @@ void spapr_dt_persistent_memory(void *fdt)
     for (iter = nvdimms; iter; iter = iter->next) {
         NVDIMMDevice *nvdimm = iter->data;
 
-        spapr_dt_nvdimm(fdt, offset, nvdimm);
+        spapr_dt_nvdimm(fdt, offset, nvdimm, machine);
     }
     g_slist_free(nvdimms);
 

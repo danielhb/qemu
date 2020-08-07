@@ -1878,10 +1878,15 @@ static target_ulong h_home_node_associativity(PowerPCCPU *cpu,
                                               target_ulong opcode,
                                               target_ulong *args)
 {
+    MachineState *machine = MACHINE(spapr);
+    SpaprMachineClass *smc = SPAPR_MACHINE_GET_CLASS(machine);
     target_ulong flags = args[0];
     target_ulong procno = args[1];
     PowerPCCPU *tcpu;
     int idx;
+    uint8_t assoc_domain1;
+    uint8_t assoc_domain2;
+    uint8_t assoc_domain3;
 
     /* only support procno from H_REGISTER_VPA */
     if (flags != 0x1) {
@@ -1893,13 +1898,17 @@ static target_ulong h_home_node_associativity(PowerPCCPU *cpu,
         return H_P2;
     }
 
+    assoc_domain1 = smc->numa_assoc_domains[tcpu->node_id][0];
+    assoc_domain2 = smc->numa_assoc_domains[tcpu->node_id][1];
+    assoc_domain3 = smc->numa_assoc_domains[tcpu->node_id][2];
+
     /* sequence is the same as in the "ibm,associativity" property */
 
     idx = 0;
 #define ASSOCIATIVITY(a, b) (((uint64_t)(a) << 32) | \
                              ((uint64_t)(b) & 0xffffffff))
-    args[idx++] = ASSOCIATIVITY(0, 0);
-    args[idx++] = ASSOCIATIVITY(0, tcpu->node_id);
+    args[idx++] = ASSOCIATIVITY(assoc_domain1, assoc_domain2);
+    args[idx++] = ASSOCIATIVITY(assoc_domain3, tcpu->node_id);
     args[idx++] = ASSOCIATIVITY(procno, -1);
     for ( ; idx < 6; idx++) {
         args[idx] = -1;

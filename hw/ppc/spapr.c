@@ -201,8 +201,13 @@ static int spapr_fixup_cpu_smt_dt(void *fdt, int offset, PowerPCCPU *cpu,
     return ret;
 }
 
-void spapr_set_associativity(uint32_t *assoc, int node_id, int cpu_index)
+void spapr_set_associativity(uint32_t *assoc, int node_id, int cpu_index,
+                             MachineState *machine)
 {
+    SpaprMachineClass *smc = SPAPR_MACHINE_GET_CLASS(machine);
+    uint8_t assoc_domain1 = smc->numa_assoc_domains[node_id][0];
+    uint8_t assoc_domain2 = smc->numa_assoc_domains[node_id][1];
+    uint8_t assoc_domain3 = smc->numa_assoc_domains[node_id][2];
     uint8_t assoc_size = 0x4;
 
     if (cpu_index >= 0) {
@@ -211,17 +216,18 @@ void spapr_set_associativity(uint32_t *assoc, int node_id, int cpu_index)
     }
 
     assoc[0] = cpu_to_be32(assoc_size);
-    assoc[1] = cpu_to_be32(0x0);
-    assoc[2] = cpu_to_be32(0x0);
-    assoc[3] = cpu_to_be32(0x0);
+    assoc[1] = cpu_to_be32(assoc_domain1);
+    assoc[2] = cpu_to_be32(assoc_domain2);
+    assoc[3] = cpu_to_be32(assoc_domain3);
     assoc[4] = cpu_to_be32(node_id);
 }
 
-static int spapr_fixup_cpu_numa_dt(void *fdt, int offset, PowerPCCPU *cpu)
+static int spapr_fixup_cpu_numa_dt(void *fdt, int offset, PowerPCCPU *cpu,
+                                   MachineState *machine)
 {
     int index = spapr_get_vcpu_id(cpu);
     uint32_t associativity[6];
-    spapr_set_associativity(associativity, cpu->node_id, index);
+    spapr_set_associativity(associativity, cpu->node_id, index, machine);
 
     /* Advertise NUMA via ibm,associativity */
     return fdt_setprop(fdt, offset, "ibm,associativity", associativity,
@@ -335,14 +341,14 @@ static void add_str(GString *s, const gchar *s1)
 }
 
 static int spapr_dt_memory_node(void *fdt, int nodeid, hwaddr start,
-                                hwaddr size)
+                                hwaddr size, MachineState *machine)
 {
     uint32_t associativity[5];
     char mem_name[32];
     uint64_t mem_reg_property[2];
     int off;
 
-    spapr_set_associativity(associativity, nodeid, -1);
+    spapr_set_associativity(associativity, nodeid, -1, machine);
 
     mem_reg_property[0] = cpu_to_be64(start);
     mem_reg_property[1] = cpu_to_be64(size);
@@ -574,6 +580,7 @@ static int spapr_dt_dynamic_reconfiguration_memory(SpaprMachineState *spapr,
                                                    void *fdt)
 {
     MachineState *machine = MACHINE(spapr);
+    SpaprMachineClass *smc = SPAPR_MACHINE_GET_CLASS(machine);
     int nb_numa_nodes = machine->numa_state->num_nodes;
     int ret, i, offset;
     uint64_t lmb_size = SPAPR_MEMORY_BLOCK_SIZE;
@@ -628,12 +635,17 @@ static int spapr_dt_dynamic_reconfiguration_memory(SpaprMachineState *spapr,
     int_buf[1] = cpu_to_be32(4); /* Number of entries per associativity list */
     cur_index += 2;
     for (i = 0; i < nr_nodes; i++) {
+        uint8_t assoc_domain1 = smc->numa_assoc_domains[i][0];
+        uint8_t assoc_domain2 = smc->numa_assoc_domains[i][1];
+        uint8_t assoc_domain3 = smc->numa_assoc_domains[i][2];
+
         uint32_t associativity[] = {
-            cpu_to_be32(0x0),
-            cpu_to_be32(0x0),
-            cpu_to_be32(0x0),
+            cpu_to_be32(assoc_domain1),
+            cpu_to_be32(assoc_domain2),
+            cpu_to_be32(assoc_domain3),
             cpu_to_be32(i)
         };
+
         memcpy(cur_index, associativity, sizeof(associativity));
         cur_index += 4;
     }
@@ -667,7 +679,7 @@ static int spapr_dt_memory(SpaprMachineState *spapr, void *fdt)
         if (!mem_start) {
             /* spapr_machine_init() checks for rma_size <= node0_size
              * already */
-            spapr_dt_memory_node(fdt, i, 0, spapr->rma_size);
+            spapr_dt_memory_node(fdt, i, 0, spapr->rma_size, machine);
             mem_start += spapr->rma_size;
             node_size -= spapr->rma_size;
         }
@@ -679,7 +691,7 @@ static int spapr_dt_memory(SpaprMachineState *spapr, void *fdt)
                 sizetmp = 1ULL << ctzl(mem_start);
             }
 
-            spapr_dt_memory_node(fdt, i, mem_start, sizetmp);
+            spapr_dt_memory_node(fdt, i, mem_start, sizetmp, machine);
             node_size -= sizetmp;
             mem_start += sizetmp;
         }
@@ -809,7 +821,7 @@ static void spapr_dt_cpu(CPUState *cs, void *fdt, int offset,
                       pft_size_prop, sizeof(pft_size_prop))));
 
     if (ms->numa_state->num_nodes > 1) {
-        _FDT(spapr_fixup_cpu_numa_dt(fdt, offset, cpu));
+        _FDT(spapr_fixup_cpu_numa_dt(fdt, offset, cpu, ms));
     }
 
     _FDT(spapr_fixup_cpu_smt_dt(fdt, offset, cpu, compat_smt));
@@ -1335,7 +1347,7 @@ void *spapr_build_fdt(SpaprMachineState *spapr, bool reset, size_t space)
 
     /* NVDIMM devices */
     if (mc->nvdimm_supported) {
-        spapr_dt_persistent_memory(fdt);
+        spapr_dt_persistent_memory(fdt, machine);
     }
 
     return fdt;
@@ -3453,6 +3465,7 @@ static void spapr_nmi(NMIState *n, int cpu_index, Error **errp)
 int spapr_lmb_dt_populate(SpaprDrc *drc, SpaprMachineState *spapr,
                           void *fdt, int *fdt_start_offset, Error **errp)
 {
+    MachineState *machine = MACHINE(spapr);
     uint64_t addr;
     uint32_t node;
 
@@ -3460,7 +3473,8 @@ int spapr_lmb_dt_populate(SpaprDrc *drc, SpaprMachineState *spapr,
     node = object_property_get_uint(OBJECT(drc->dev), PC_DIMM_NODE_PROP,
                                     &error_abort);
     *fdt_start_offset = spapr_dt_memory_node(fdt, node, addr,
-                                             SPAPR_MEMORY_BLOCK_SIZE);
+                                             SPAPR_MEMORY_BLOCK_SIZE,
+                                             machine);
     return 0;
 }
 
