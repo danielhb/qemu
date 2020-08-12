@@ -863,6 +863,7 @@ int spapr_phb_dt_populate(SpaprDrc *drc, SpaprMachineState *spapr,
 
 void spapr_rtc_read(SpaprRtcState *rtc, struct tm *tm, uint32_t *ns);
 int spapr_rtc_import_offset(SpaprRtcState *rtc, int64_t legacy_offset);
+void spapr_set_associativity(uint32_t *assoc, int node_id, int cpu_index);
 
 #define TYPE_SPAPR_RNG "spapr-rng"
 
