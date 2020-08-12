@@ -201,15 +201,27 @@ static int spapr_fixup_cpu_smt_dt(void *fdt, int offset, PowerPCCPU *cpu,
     return ret;
 }
 
+void spapr_set_associativity(uint32_t *assoc, int node_id, int cpu_index)
+{
+    uint8_t assoc_size = 0x4;
+
+    if (cpu_index >= 0) {
+        assoc_size = 0x5;
+        assoc[5] = cpu_to_be32(cpu_index);
+    }
+
+    assoc[0] = cpu_to_be32(assoc_size);
+    assoc[1] = cpu_to_be32(0x0);
+    assoc[2] = cpu_to_be32(0x0);
+    assoc[3] = cpu_to_be32(0x0);
+    assoc[4] = cpu_to_be32(node_id);
+}
+
 static int spapr_fixup_cpu_numa_dt(void *fdt, int offset, PowerPCCPU *cpu)
 {
     int index = spapr_get_vcpu_id(cpu);
-    uint32_t associativity[] = {cpu_to_be32(0x5),
-                                cpu_to_be32(0x0),
-                                cpu_to_be32(0x0),
-                                cpu_to_be32(0x0),
-                                cpu_to_be32(cpu->node_id),
-                                cpu_to_be32(index)};
+    uint32_t associativity[6];
+    spapr_set_associativity(associativity, cpu->node_id, index);
 
     /* Advertise NUMA via ibm,associativity */
     return fdt_setprop(fdt, offset, "ibm,associativity", associativity,
@@ -325,14 +337,12 @@ static void add_str(GString *s, const gchar *s1)
 static int spapr_dt_memory_node(void *fdt, int nodeid, hwaddr start,
                                 hwaddr size)
 {
-    uint32_t associativity[] = {
-        cpu_to_be32(0x4), /* length */
-        cpu_to_be32(0x0), cpu_to_be32(0x0),
-        cpu_to_be32(0x0), cpu_to_be32(nodeid)
-    };
+    uint32_t associativity[5];
     char mem_name[32];
     uint64_t mem_reg_property[2];
     int off;
+
+    spapr_set_associativity(associativity, nodeid, -1);
 
     mem_reg_property[0] = cpu_to_be64(start);
     mem_reg_property[1] = cpu_to_be64(size);
