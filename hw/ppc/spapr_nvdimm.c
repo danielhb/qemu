@@ -115,11 +115,8 @@ int spapr_dt_nvdimm(void *fdt, int parent_offset,
                                              &error_abort);
     uint64_t slot = object_property_get_uint(OBJECT(nvdimm), PC_DIMM_SLOT_PROP,
                                              &error_abort);
-    uint32_t associativity[] = {
-        cpu_to_be32(0x4), /* length */
-        cpu_to_be32(0x0), cpu_to_be32(0x0),
-        cpu_to_be32(0x0), cpu_to_be32(node)
-    };
+    g_autofree uint32_t *associativity = NULL;
+    int len = spapr_set_associativity(associativity, node, -1);
     uint64_t lsize = nvdimm->label_size;
     uint64_t size = object_property_get_int(OBJECT(nvdimm), PC_DIMM_SIZE_PROP,
                                             NULL);
@@ -139,8 +136,7 @@ int spapr_dt_nvdimm(void *fdt, int parent_offset,
     _FDT((fdt_setprop_string(fdt, child_offset, "compatible", "ibm,pmemory")));
     _FDT((fdt_setprop_string(fdt, child_offset, "device_type", "ibm,pmemory")));
 
-    _FDT((fdt_setprop(fdt, child_offset, "ibm,associativity", associativity,
-                      sizeof(associativity))));
+    _FDT((fdt_setprop(fdt, child_offset, "ibm,associativity", associativity, len)));
 
     buf = qemu_uuid_unparse_strdup(&nvdimm->uuid);
     _FDT((fdt_setprop_string(fdt, child_offset, "ibm,unit-guid", buf)));
