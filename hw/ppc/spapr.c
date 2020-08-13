@@ -222,6 +222,109 @@ void spapr_set_associativity(uint32_t *assoc, int node_id, int cpu_index,
     assoc[4] = cpu_to_be32(node_id);
 }
 
+static void spapr_numa_assoc_assign_domain(SpaprMachineClass *smc,
+                                           uint8_t nodeA, uint8_t nodeB,
+                                           uint8_t numaLevel,
+                                           uint8_t curr_domain)
+{
+    uint8_t assoc_A, assoc_B;
+
+    assoc_A = smc->numa_assoc_domains[nodeA][numaLevel];
+    assoc_B = smc->numa_assoc_domains[nodeB][numaLevel];
+
+    /* No associativity domains on both. Assign and move on */
+    if ((assoc_A | assoc_B) == 0) {
+        smc->numa_assoc_domains[nodeB][numaLevel] = curr_domain;
+        smc->numa_assoc_domains[nodeB][numaLevel] = curr_domain;
+        return;
+    }
+
+    /* Use the existing assoc domain of any of the nodes to not
+     * disrupt previous associations already defined */
+    if (assoc_A != 0) {
+        smc->numa_assoc_domains[nodeB][numaLevel] = assoc_A;
+    } else {
+        smc->numa_assoc_domains[nodeA][numaLevel] = assoc_B;
+    }
+}
+
+static void spapr_init_numa_assoc_domains(MachineState *machine)
+{
+    SpaprMachineClass *smc = SPAPR_MACHINE_GET_CLASS(machine);
+    int nb_numa_nodes = machine->numa_state->num_nodes;
+    NodeInfo *numa_info = machine->numa_state->nodes;
+    uint8_t existing_nodes[nb_numa_nodes];
+    int i, j, src_node, dst_node, index = 0;
+
+    /* We don't have information about any extra NUMA nodes that
+     * the machine might create at this point (e.g. NVLink2 GPUs).
+     * Assigning associativity domains with low numbers might have
+     * unintended consequences in the presence of GPUs, which are
+     * supposed to always be at maximum distance of everything else,
+     * because we might end up using a GPU numa_id identifier by
+     * accident.
+     *
+     * Starting this counter at MAX_NODES avoids any possible
+     * collision since no NUMA id can reach this value. */
+    uint8_t assoc_domain = MAX_NODES;
+
+    /* We will assume that the NUMA nodes might be sparsed. This
+     * preliminary fetch step is required to avoid having to search
+     * for an existing NUMA node more than once. */
+    for (i = 0; i < MAX_NODES; i++) {
+        if (numa_info[i].present) {
+            existing_nodes[index++] = i;
+            if (index == nb_numa_nodes) {
+                break;
+            }
+        }
+    }
+
+    /* Start iterating through the existing numa nodes to
+     * define associativity groups */
+    for (i = 0; i < nb_numa_nodes; i++) {
+        uint8_t distance = 20;
+        uint8_t lower_end = 10;
+        uint8_t upper_end = 0;
+
+        src_node = existing_nodes[i];
+
+        /* Calculate all associativity domains src_node belongs to. */
+        for(index = 0; index < 3; index++) {
+            upper_end = distance/2 + distance;
+
+            for(j = i + 1; j < nb_numa_nodes; j++) {
+                uint8_t node_dist;
+
+                dst_node = existing_nodes[j];
+                node_dist = numa_info[src_node].distance[dst_node];
+
+                if (node_dist > lower_end && node_dist <= upper_end) {
+                    spapr_numa_assoc_assign_domain(smc, src_node, dst_node,
+                                                   2 - index, assoc_domain);
+                                                   assoc_domain++;
+                }
+            }
+
+            lower_end = upper_end;
+            distance *= 2;
+        }
+    }
+
+    /* Zero (0) is considered a valid associativity domain identifier.
+     * To avoid NUMA nodes having matches where it wasn't intended, fill
+     * the zeros with unique identifiers. */
+    for (i = 0; i < nb_numa_nodes; i++) {
+        src_node = existing_nodes[i];
+        for (j = 0; j < 3; j++) {
+            if (smc->numa_assoc_domains[src_node][j] == 0) {
+                smc->numa_assoc_domains[src_node][j] = assoc_domain;
+                assoc_domain++;
+            }
+        }
+    }
+ }
+
 static int spapr_fixup_cpu_numa_dt(void *fdt, int offset, PowerPCCPU *cpu,
                                    MachineState *machine)
 {
@@ -2886,6 +2989,12 @@ static void spapr_machine_init(MachineState *machine)
      */
     spapr->current_numa_id = 0;
     spapr->extra_numa_nodes = 0;
+
+    /* We don't need to init the NUMA matrix if we're running in
+     * legacy NUMA mode. */
+    if (spapr_machine_using_legacy_numa(spapr)) {
+        spapr_init_numa_assoc_domains(machine);
+    }
 
     if ((!kvm_enabled() || kvmppc_has_cap_mmu_radix()) &&
         ppc_type_check_compat(machine->cpu_type, CPU_POWERPC_LOGICAL_3_00, 0,
