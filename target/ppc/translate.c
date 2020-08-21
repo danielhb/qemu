@@ -2630,7 +2630,8 @@ static void gen_rfebb(DisasContext *ctx)
 
     tcg_temp_free(target);
     tcg_temp_free(bescr);
-    mock();
+
+//  mock();
 }
 
 #endif
