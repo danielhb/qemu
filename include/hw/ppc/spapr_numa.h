@@ -13,8 +13,13 @@
 #ifndef HW_SPAPR_NUMA_H
 #define HW_SPAPR_NUMA_H
 
+#include "hw/boards.h"
 #include "hw/ppc/spapr.h"
 
+void spapr_numa_associativity_init(MachineState *machine);
 void spapr_numa_write_rtas_dt(SpaprMachineState *spapr, void *fdt, int rtas);
+void spapr_numa_write_associativity_dt(SpaprMachineState *spapr, void *fdt,
+                                       int offset, int nodeid);
+
 
 #endif /* HW_SPAPR_NUMA_H */
