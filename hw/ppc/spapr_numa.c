@@ -15,6 +15,8 @@
 #include "hw/ppc/spapr_numa.h"
 #include "hw/ppc/fdt.h"
 
+/* Moved from hw/ppc/spapr_pci_nvlink2.c */
+#define SPAPR_GPU_NUMA_ID           (cpu_to_be32(1))
 
 void spapr_numa_associativity_init(MachineState *machine)
 {
@@ -112,6 +114,27 @@ int spapr_numa_write_assoc_lookup_arrays(SpaprMachineState *spapr, void *fdt,
     g_free(int_buf);
 
     return ret;
+}
+
+void spapr_numa_write_assoc_nvlink2(void *fdt, int offset, int numa_id,
+                                    SpaprPhbState *sphb)
+{
+    uint32_t associativity[NUMA_ASSOC_SIZE];
+    int i;
+
+    associativity[0] = cpu_to_be32(MAX_DISTANCE_REF_POINTS);
+    for (i = 1; i < NUMA_ASSOC_SIZE; i++) {
+        associativity[i] = cpu_to_be32(numa_id);
+    };
+
+    if (sphb->pre_5_1_assoc) {
+        associativity[1] = SPAPR_GPU_NUMA_ID;
+        associativity[2] = SPAPR_GPU_NUMA_ID;
+        associativity[3] = SPAPR_GPU_NUMA_ID;
+    }
+
+    _FDT((fdt_setprop(fdt, offset, "ibm,associativity", associativity,
+                      sizeof(associativity))));
 }
 
 /*

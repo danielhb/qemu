@@ -15,6 +15,7 @@
 
 #include "hw/boards.h"
 #include "hw/ppc/spapr.h"
+#include "hw/pci-host/spapr.h"
 
 void spapr_numa_associativity_init(MachineState *machine);
 void spapr_numa_write_rtas_dt(SpaprMachineState *spapr, void *fdt, int rtas);
@@ -24,6 +25,8 @@ int spapr_numa_fixup_cpu_dt(SpaprMachineState *spapr, void *fdt,
                             int offset, PowerPCCPU *cpu);
 int spapr_numa_write_assoc_lookup_arrays(SpaprMachineState *spapr, void *fdt,
                                          int offset);
+void spapr_numa_write_assoc_nvlink2(void *fdt, int offset, int numa_id,
+                                    SpaprPhbState *sphb);
 
 
 #endif /* HW_SPAPR_NUMA_H */
