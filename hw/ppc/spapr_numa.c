@@ -71,13 +71,15 @@ void spapr_numa_write_associativity_dt(SpaprMachineState *spapr, void *fdt,
                       sizeof(spapr->numa_assoc_array[nodeid]))));
 }
 
-int spapr_numa_fixup_cpu_dt(SpaprMachineState *spapr, void *fdt,
-                            int offset, PowerPCCPU *cpu)
+static uint32_t *spapr_numa_get_vcpu_assoc(SpaprMachineState *spapr,
+                                          PowerPCCPU *cpu,
+                                          uint *vcpu_assoc_size)
 {
-    uint vcpu_assoc_size = NUMA_ASSOC_SIZE + 1;
-    uint32_t vcpu_assoc[vcpu_assoc_size];
+    uint32_t *vcpu_assoc = NULL;
     int index = spapr_get_vcpu_id(cpu);
-    int i;
+
+    *vcpu_assoc_size = (NUMA_ASSOC_SIZE + 1) * sizeof(uint32_t);
+    vcpu_assoc = g_malloc(*vcpu_assoc_size);
 
     /*
      * VCPUs have an extra 'cpu_id' value in ibm,associativity
@@ -86,16 +88,24 @@ int spapr_numa_fixup_cpu_dt(SpaprMachineState *spapr, void *fdt,
      * cpu_id last.
      */
     vcpu_assoc[0] = cpu_to_be32(MAX_DISTANCE_REF_POINTS + 1);
+    memcpy(vcpu_assoc + 1, spapr->numa_assoc_array[cpu->node_id],
+           MAX_DISTANCE_REF_POINTS);
+    vcpu_assoc[MAX_DISTANCE_REF_POINTS + 1] = cpu_to_be32(index);
 
-    for (i = 1; i <= MAX_DISTANCE_REF_POINTS; i++) {
-        vcpu_assoc[i] = spapr->numa_assoc_array[cpu->node_id][i];
-    }
+    return vcpu_assoc;
+}
 
-    vcpu_assoc[vcpu_assoc_size - 1] = cpu_to_be32(index);
+int spapr_numa_fixup_cpu_dt(SpaprMachineState *spapr, void *fdt,
+                            int offset, PowerPCCPU *cpu)
+{
+    g_autofree uint32_t *vcpu_assoc = NULL;
+    uint vcpu_assoc_size;
+
+    vcpu_assoc = spapr_numa_get_vcpu_assoc(spapr, cpu, &vcpu_assoc_size);
 
     /* Advertise NUMA via ibm,associativity */
     return fdt_setprop(fdt, offset, "ibm,associativity",
-                       vcpu_assoc, sizeof(vcpu_assoc));
+                       vcpu_assoc, vcpu_assoc_size);
 }
 
 
