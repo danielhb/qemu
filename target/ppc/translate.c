@@ -546,6 +546,20 @@ void spr_read_ureg_special(DisasContext *ctx, int gprn, int sprn)
             tcg_gen_andi_tl(t0, t0, MMCR0_FC | MMCR0_PMAO | MMCR0_PMAE);
             tcg_gen_mov_tl(cpu_gpr[gprn], t0);
         break;
+        case SPR_POWER_MMCR2:
+            /* On read, filter out all bits that are not FCnP0 bits. When
+             * MMCR0[PMCC] is set to 0b10 or 0b11, providing problem state
+             * programs read/write access to MMCR2, only the FCnP0 bits can be
+             * accessed. All other bits are not changed when mtspr is executed
+             * in problem state, and all other bits return 0s when mfspr is
+             * executed in problem state, accordingly to ISA v3.1, section
+             * 10.4.6 Monitor Mode Control Register 2, p. 1316, third para.
+             */
+            // printf("----> mfspr MMCR2\n");
+            gen_load_spr(t0, effective_sprn);
+            tcg_gen_andi_tl(t0, t0, 0x4020100804020000UL);
+            tcg_gen_mov_tl(cpu_gpr[gprn], t0);
+        break;
         default:
             // printf("spr_read_ureg_special: SPR %d is unknown!\n", sprn);
             gen_load_spr(cpu_gpr[gprn], effective_sprn);
