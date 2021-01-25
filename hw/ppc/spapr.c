@@ -2719,6 +2719,7 @@ static void spapr_machine_init(MachineState *machine)
     }
 
     spapr_ovec_set(spapr->ov5, OV5_FORM1_AFFINITY);
+    spapr_ovec_set(spapr->ov5, OV5_NUMA_EXTENSION);
 
     /* advertise support for dedicated HP event source to guests */
     if (spapr->use_hotplug_event_source) {
