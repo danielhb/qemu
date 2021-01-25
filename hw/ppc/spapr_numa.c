@@ -279,6 +279,40 @@ int spapr_numa_write_assoc_lookup_arrays(SpaprMachineState *spapr, void *fdt,
     return ret;
 }
 
+static void spapr_numa_write_distance_lookup_dt(SpaprMachineState *spapr,
+                                                void *fdt, int rtas)
+{
+    MachineState *ms = MACHINE(spapr);
+    NodeInfo *numa_info = ms->numa_state->nodes;
+    int nb_numa_nodes = ms->numa_state->num_nodes;
+    int src, dst, i;
+    int numa_dist_lookup_size = nb_numa_nodes * nb_numa_nodes;
+    g_autofree uint32_t *numa_dist_lookup = g_new0(uint32_t,
+                                                   numa_dist_lookup_size + 1);
+    g_autofree uint32_t *numa_dist_indexes = g_new0(uint32_t,
+                                                    nb_numa_nodes + 1);
+
+    numa_dist_indexes[0] = cpu_to_be32(nb_numa_nodes);
+    for (i = 0; i < nb_numa_nodes; i++) {
+        numa_dist_indexes[i + 1] = cpu_to_be32(i);
+    }
+
+    numa_dist_lookup[0] = cpu_to_be32(numa_dist_lookup_size);
+    i = 1;
+
+    for (src = 0; src < nb_numa_nodes; src++) {
+        for (dst = 0; dst < nb_numa_nodes; dst++) {
+            uint32_t distance = numa_info[src].distance[dst];
+            numa_dist_lookup[i++] = cpu_to_be32(distance);
+        }
+    }
+
+    _FDT(fdt_setprop(fdt, rtas, "ibm,numa-distance-lookup-table", numa_dist_lookup,
+                     (numa_dist_lookup_size + 1) * sizeof(uint32_t)));
+    _FDT(fdt_setprop(fdt, rtas, "ibm,numa-distance-lookup-indexes", numa_dist_indexes,
+                     (nb_numa_nodes + 1) * sizeof(uint32_t)));
+}
+
 /*
  * Helper that writes ibm,associativity-reference-points and
  * max-associativity-domains in the RTAS pointed by @rtas
@@ -288,6 +322,8 @@ void spapr_numa_write_rtas_dt(SpaprMachineState *spapr, void *fdt, int rtas)
 {
     MachineState *ms = MACHINE(spapr);
     SpaprMachineClass *smc = SPAPR_MACHINE_GET_CLASS(spapr);
+    bool using_legacy_numa = spapr_machine_using_legacy_numa(spapr);
+
     uint32_t refpoints[] = {
         cpu_to_be32(0x4),
         cpu_to_be32(0x3),
@@ -338,6 +374,10 @@ void spapr_numa_write_rtas_dt(SpaprMachineState *spapr, void *fdt, int rtas)
 
     _FDT(fdt_setprop(fdt, rtas, "ibm,max-associativity-domains",
                      maxdomains, sizeof(maxdomains)));
+
+    if (!using_legacy_numa) {
+        spapr_numa_write_distance_lookup_dt(spapr, fdt, rtas);
+    }
 }
 
 static target_ulong h_home_node_associativity(PowerPCCPU *cpu,
