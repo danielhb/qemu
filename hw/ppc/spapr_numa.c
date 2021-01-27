@@ -197,9 +197,7 @@ void spapr_numa_associativity_init(SpaprMachineState *spapr,
     }
 
     if (!spapr_numa_is_symmetrical(machine)) {
-        error_report("Asymmetrical NUMA topologies aren't supported "
-                     "in the pSeries machine");
-        exit(EXIT_FAILURE);
+        // do nothing
     }
 
     spapr_numa_define_associativity_domains(spapr);
