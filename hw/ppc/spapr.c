@@ -3664,7 +3664,7 @@ static void spapr_memory_unplug_request(HotplugHandler *hotplug_dev,
     uint32_t nr_lmbs;
     uint64_t size, addr_start, addr;
     int i;
-    SpaprDrc *drc;
+    SpaprDrc *drc, *drc_start;
 
     if (object_dynamic_cast(OBJECT(dev), TYPE_NVDIMM)) {
         error_setg(errp, "nvdimm device hot unplug is not supported yet.");
@@ -3676,6 +3676,10 @@ static void spapr_memory_unplug_request(HotplugHandler *hotplug_dev,
 
     addr_start = object_property_get_uint(OBJECT(dimm), PC_DIMM_ADDR_PROP,
                                           &error_abort);
+
+    drc_start = spapr_drc_by_id(TYPE_SPAPR_DRC_LMB,
+                                addr_start / SPAPR_MEMORY_BLOCK_SIZE);
+    g_assert(drc_start);
 
     /*
      * An existing pending dimm state for this DIMM means that there is an
@@ -3701,11 +3705,9 @@ static void spapr_memory_unplug_request(HotplugHandler *hotplug_dev,
         addr += SPAPR_MEMORY_BLOCK_SIZE;
     }
 
-    drc = spapr_drc_by_id(TYPE_SPAPR_DRC_LMB,
-                          addr_start / SPAPR_MEMORY_BLOCK_SIZE);
-    g_assert(drc);
     spapr_hotplug_req_remove_by_count_indexed(SPAPR_DR_CONNECTOR_TYPE_LMB,
-                                              nr_lmbs, spapr_drc_index(drc));
+                                              nr_lmbs,
+                                              spapr_drc_index(drc_start));
 }
 
 /* Callback to be called during DRC release. */
