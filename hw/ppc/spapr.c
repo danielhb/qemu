@@ -3681,13 +3681,7 @@ static void spapr_memory_unplug_request(HotplugHandler *hotplug_dev,
                                 addr_start / SPAPR_MEMORY_BLOCK_SIZE);
     g_assert(drc_start);
 
-    /*
-     * An existing pending dimm state for this DIMM means that there is an
-     * unplug operation in progress, waiting for the spapr_lmb_release
-     * callback to complete the job (BQL can't cover that far). In this case,
-     * bail out to avoid detaching DRCs that were already released.
-     */
-    if (spapr_pending_dimm_unplugs_find(spapr, dimm)) {
+    if (spapr_drc_unplug_requested(drc_start)) {
         error_setg(errp, "Memory unplug already in progress for device %s",
                    dev->id);
         return;
