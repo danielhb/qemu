@@ -657,7 +657,6 @@ static void spapr_dt_cpu(CPUState *cs, void *fdt, int offset,
     uint32_t page_sizes_prop[64];
     size_t page_sizes_prop_size;
     unsigned int smp_threads = ms->smp.threads;
-    uint32_t vcpus_per_socket = smp_threads * ms->smp.cores;
     uint32_t pft_size_prop[] = {0, cpu_to_be32(spapr->htab_shift)};
     int compat_smt = MIN(smp_threads, ppc_compat_max_vthreads(cpu));
     SpaprDrc *drc;
@@ -743,9 +742,6 @@ static void spapr_dt_cpu(CPUState *cs, void *fdt, int offset,
     }
 
     spapr_dt_pa_features(spapr, cpu, fdt, offset);
-
-    _FDT((fdt_setprop_cell(fdt, offset, "ibm,chip-id",
-                           cs->cpu_index / vcpus_per_socket)));
 
     _FDT((fdt_setprop(fdt, offset, "ibm,pft-size",
                       pft_size_prop, sizeof(pft_size_prop))));
