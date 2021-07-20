@@ -392,6 +392,7 @@ void spr_read_pmu_generic(DisasContext *ctx, int gprn, int sprn)
 {
     spr_read_generic(ctx, gprn, sprn);
 
+    printf("--- read sprn %x \n", sprn);
     if (sprn == SPR_POWER_PMC5) {
         unsigned long pmc5 = PMU_get_PMC5();
 
@@ -545,10 +546,12 @@ void spr_read_pmu_ureg(DisasContext *ctx, int gprn, int sprn)
     TCGv t0 = tcg_temp_new();
     int effective_sprn = sprn + 0x10;
 
+    printf("--- read PMU sprn %x, effective_sprn %x \n", sprn, sprn + 0x10);
+
     if (effective_sprn == SPR_POWER_PMC5) {
         unsigned long pmc5 = PMU_get_PMC5();
 
-        printf("--- pmc5 is %lu", pmc5);
+        printf("--- pmc5 is %lu \n", pmc5);
     }
 
     switch (effective_sprn) {
