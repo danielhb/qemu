@@ -40,6 +40,8 @@
 #include "qemu/qemu-print.h"
 #include "qapi/error.h"
 
+#include "pmu-book3s-v3.h"
+
 #define CPU_SINGLE_STEP 0x1
 #define CPU_BRANCH_STEP 0x2
 #define GDBSTUB_SINGLE_STEP 0x4
@@ -409,8 +411,10 @@ void spr_write_generic(DisasContext *ctx, int sprn, int gprn)
 
 void spr_write_pmu_generic(DisasContext *ctx, int sprn, int gprn)
 {
-    /* For now it's just a call to spr_write_generic() */
     spr_write_generic(ctx, sprn, gprn);
+
+    PMU_set_freeze_counters(ctx->spr[SPR_POWER_MMCR0] & MMCR0_FC);
+    PMU_set_freeze_PMC5PMC6(ctx->spr[SPR_POWER_MMCR0] & MMCR0_FC56);
 }
 
 #if !defined(CONFIG_USER_ONLY)

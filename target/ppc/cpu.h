@@ -344,6 +344,8 @@ typedef struct ppc_v3_pate_t {
 
 /* PMU bits */
 #define MMCR0_FC    PPC_BIT(32)         /* Freeze Counters  */
+#define MMCR0_FC14  PPC_BIT(58)         /* Freeze Counters PMC1-PMC4 */
+#define MMCR0_FC56  PPC_BIT(59)         /* Freeze Counters PMC5 PMC6 */
 #define MMCR0_PMAO  PPC_BIT(56)         /* Perf Monitor Alert Ocurred */
 #define MMCR0_PMAE  PPC_BIT(37)         /* Perf Monitor Alert Enable */
 #define MMCR0_EBE   PPC_BIT(43)         /* Perf Monitor EBB Enable */
