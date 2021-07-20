@@ -390,8 +390,13 @@ void spr_read_generic(DisasContext *ctx, int gprn, int sprn)
 
 void spr_read_pmu_generic(DisasContext *ctx, int gprn, int sprn)
 {
-    /* For now it's just a call to spr_read_generic() */
     spr_read_generic(ctx, gprn, sprn);
+
+    if (sprn == SPR_POWER_PMC5) {
+        unsigned long pmc5 = PMU_get_PMC5();
+
+        printf("--- pmc5 is %lu", pmc5);
+    }
 }
 
 static void spr_store_dump_spr(int sprn)
@@ -539,6 +544,12 @@ void spr_read_pmu_ureg(DisasContext *ctx, int gprn, int sprn)
 {
     TCGv t0 = tcg_temp_new();
     int effective_sprn = sprn + 0x10;
+
+    if (effective_sprn == SPR_POWER_PMC5) {
+        unsigned long pmc5 = PMU_get_PMC5();
+
+        printf("--- pmc5 is %lu", pmc5);
+    }
 
     switch (effective_sprn) {
         case SPR_POWER_MMCR0:
@@ -8736,6 +8747,8 @@ static void ppc_tr_tb_stop(DisasContextBase *dcbase, CPUState *cs)
     DisasJumpType is_jmp = ctx->base.is_jmp;
     target_ulong nip = ctx->base.pc_next;
     int sse;
+
+    PMU_instructions_completed(dcbase->num_insns);
 
     if (is_jmp == DISAS_NORETURN) {
         /* We have already exited the TB. */

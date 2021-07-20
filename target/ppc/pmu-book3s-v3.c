@@ -51,3 +51,26 @@ void init_book3s_PMU(void)
 {
     pmuState.freeze_counters = true;
 }
+
+void PMU_instructions_completed(int num_insns)
+{
+    if (pmuState.freeze_counters) {
+        return;
+    }
+
+    if (!pmuState.freeze_pmc5_pmc6) {
+        pmuState.PMC5 += num_insns;
+        pmuState.PMC6 += num_insns * 4;
+    }
+}
+
+unsigned long PMU_get_PMC5(void)
+{
+    return pmuState.PMC5;
+
+}
+
+unsigned long PMU_get_PMC6(void)
+{
+    return pmuState.PMC6;
+}

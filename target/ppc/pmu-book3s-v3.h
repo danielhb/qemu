@@ -17,6 +17,10 @@
 
 void PMU_set_freeze_counters(bool fc);
 void PMU_set_freeze_PMC5PMC6(bool fc56);
+
+void PMU_instructions_completed(int num_insns);
+unsigned long PMU_get_PMC5(void);
+unsigned long PMU_get_PMC6(void);
 void init_book3s_PMU(void);
 
 #endif /* PPC_MMU_BOOK3S_V3_H */
