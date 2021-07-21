@@ -623,6 +623,9 @@ void spr_write_pmu_ureg(DisasContext *ctx, int sprn, int gprn)
                 tcg_gen_andi_tl(t1, t1, ~(MMCR0_FC | MMCR0_PMAO | MMCR0_PMAE));
                 tcg_gen_or_tl(t1, t1, t0); // Keep all other bits intact
                 gen_store_spr(effective_sprn, t1);
+
+                PMU_set_freeze_counters(ctx->spr[SPR_POWER_MMCR0] & MMCR0_FC);
+                PMU_set_freeze_PMC5PMC6(ctx->spr[SPR_POWER_MMCR0] & MMCR0_FC56);
                 break;
             default:
                 gen_store_spr(effective_sprn, cpu_gpr[gprn]);
