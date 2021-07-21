@@ -452,12 +452,14 @@ void spr_write_generic(DisasContext *ctx, int sprn, int gprn)
     spr_store_dump_spr(sprn);
 }
 
-static bool freeze_count = false;
-
 void spr_write_pmu_generic(DisasContext *ctx, int sprn, int gprn)
 {
+
+    printf("$$$$$$$ spr_write_pmu_generic, sprn = %d \n", sprn);
+#if 0
     TCGv t0;
     TCGLabel *l;
+
 
     if (sprn == SPR_POWER_MMCR0) {
         printf("---- MMCR0 being set in spr_write_pmu_generic \n");
@@ -466,13 +468,14 @@ void spr_write_pmu_generic(DisasContext *ctx, int sprn, int gprn)
         t0 = tcg_temp_new();
 
         tcg_gen_andi_tl(t0, cpu_gpr[gprn], MMCR0_FC);
-        tcg_gen_brcondi_i64(TCG_COND_EQ, t0, 1, l);
+        tcg_gen_brcondi_i64(TCG_COND_NE, t0, MMCR0_FC, l);
         freeze_count = true;
         printf("---- MMCR0 set FC = true spr_write_pmu_generic \n");
 
         gen_set_label(l);
         tcg_temp_free(t0);
     }
+#endif
 
     spr_write_generic(ctx, sprn, gprn);
 
@@ -670,15 +673,21 @@ void spr_write_pmu_ureg(DisasContext *ctx, int sprn, int gprn)
     TCGv t0 = tcg_temp_new();
     TCGv t1 = tcg_temp_new();
 
+    // TCGv t2;
+    // TCGLabel *l;
+
     int effective_sprn = sprn + 0x10;
 
     printf("--- write PMU sprn %x, effective_sprn %x \n", sprn, sprn + 0x10);
 
+#if 0
     if (((ctx->spr[SPR_POWER_MMCR0] & MMCR0_PMCC) >> 18) == 0) {
         /* Hypervisor Emulation Assistance interrupt */
         gen_hvpriv_exception(ctx, POWERPC_EXCP_INVAL_SPR);
-    } else {
-        switch (effective_sprn) {
+    }
+#endif
+    
+    switch (effective_sprn) {
             case SPR_POWER_PMC1:
             case SPR_POWER_PMC2:
             case SPR_POWER_PMC3:
@@ -691,6 +700,19 @@ void spr_write_pmu_ureg(DisasContext *ctx, int sprn, int gprn)
             case SPR_POWER_MMCR0:
                  printf("----- ctx->spr[SPR_POWER_MMCR0] before ureg writing: %lx \n",
                         ctx->spr[SPR_POWER_MMCR0]);
+#if 0                
+                freeze_count = false;
+                l = gen_new_label();
+                t2 = tcg_temp_new();
+
+                tcg_gen_andi_tl(t2, cpu_gpr[gprn], MMCR0_FC);
+                tcg_gen_brcondi_i64(TCG_COND_NE, t2, 0, l);
+                freeze_count = true;
+                printf("---- MMCR0 set FC = true spr_write_pmu_ureg \n");
+
+                gen_set_label(l);
+                tcg_temp_free(t2);
+#endif
                 /*
                  * Filter out all bits but FC, PMAO, and PMAE, according
                  * to ISA v3.1, in 10.4.4 Monitor Mode Control Register 0,
@@ -713,8 +735,7 @@ void spr_write_pmu_ureg(DisasContext *ctx, int sprn, int gprn)
                 gen_store_spr(effective_sprn, cpu_gpr[gprn]);
                 break;
         }
-    }
-
+    
     tcg_temp_free(t0);
     tcg_temp_free(t1);
 }
@@ -8757,14 +8778,14 @@ static void ppc_tr_tb_start(DisasContextBase *db, CPUState *cs)
 }
 
 
-static void PMU_inc_insns_count(int insns)
+static void PMU_inc_insns_count(DisasContextBase *dcbase, int insns)
 {
-    // DisasContext *ctx = container_of(dcbase, DisasContext, base);
+    DisasContext *ctx = container_of(dcbase, DisasContext, base);
     // CPUPPCState *env = cs->env_ptr;
     TCGv t0 = tcg_temp_new();
     TCGv t1 = tcg_temp_new();
 
-    if (freeze_count) {
+    if (ctx->spr[SPR_POWER_MMCR0] & MMCR0_FC) {
         goto cleanup;
     }
 
@@ -8787,7 +8808,7 @@ static void ppc_tr_insn_start(DisasContextBase *dcbase, CPUState *cs)
 {
     // PMU_inc_insns_count(cs);
     tcg_gen_insn_start(dcbase->pc_next);
-    PMU_inc_insns_count(1);
+    PMU_inc_insns_count(dcbase, 1);
     //PMU_instructions_completed(1);
 }
 
