@@ -388,16 +388,46 @@ void spr_read_generic(DisasContext *ctx, int gprn, int sprn)
     spr_load_dump_spr(sprn);
 }
 
+static bool spr_pmu_is_PMC(int sprn)
+{
+    bool val = false;
+
+    switch (sprn) {
+        case SPR_POWER_PMC1:
+        case SPR_POWER_PMC2:
+        case SPR_POWER_PMC3:
+        case SPR_POWER_PMC4:
+        case SPR_POWER_PMC5:
+        case SPR_POWER_PMC6:
+            val = true;
+            break;
+        default:
+            break;
+    }
+
+    return val;
+}
+
+static void spr_pmu_read_PMC(DisasContext *ctx, int gprn, int sprn)
+{
+    TCGv t0 = tcg_temp_new();
+
+    gen_load_spr(t0, sprn);
+    tcg_gen_movi_i64(t0, PMU_get_PMC(sprn));
+    tcg_gen_mov_tl(cpu_gpr[gprn], t0);
+
+    tcg_temp_free(t0);
+}
+
+
 void spr_read_pmu_generic(DisasContext *ctx, int gprn, int sprn)
 {
-    spr_read_generic(ctx, gprn, sprn);
-
-    printf("--- read sprn %x \n", sprn);
-    if (sprn == SPR_POWER_PMC5) {
-        unsigned long pmc5 = PMU_get_PMC5();
-
-        printf("--- pmc5 is %lu", pmc5);
+    if (spr_pmu_is_PMC(sprn)) {
+        spr_pmu_read_PMC(ctx, gprn, sprn);
+        return;
     }
+
+    spr_read_generic(ctx, gprn, sprn);
 }
 
 static void spr_store_dump_spr(int sprn)
@@ -418,6 +448,11 @@ void spr_write_generic(DisasContext *ctx, int sprn, int gprn)
 void spr_write_pmu_generic(DisasContext *ctx, int sprn, int gprn)
 {
     spr_write_generic(ctx, sprn, gprn);
+
+    if (spr_pmu_is_PMC(sprn)) {
+        PMU_set_PMC(sprn, ctx->spr[sprn]);
+        return;
+    }
 
     PMU_set_freeze_counters(ctx->spr[SPR_POWER_MMCR0] & MMCR0_FC);
     PMU_set_freeze_PMC5PMC6(ctx->spr[SPR_POWER_MMCR0] & MMCR0_FC56);
@@ -543,16 +578,17 @@ void spr_read_ureg(DisasContext *ctx, int gprn, int sprn)
 /* User special read access to PMU SPRs */
 void spr_read_pmu_ureg(DisasContext *ctx, int gprn, int sprn)
 {
-    TCGv t0 = tcg_temp_new();
     int effective_sprn = sprn + 0x10;
+    TCGv t0;
 
     printf("--- read PMU sprn %x, effective_sprn %x \n", sprn, sprn + 0x10);
 
-    if (effective_sprn == SPR_POWER_PMC5) {
-        unsigned long pmc5 = PMU_get_PMC5();
-
-        printf("--- pmc5 is %lu \n", pmc5);
+    if (spr_pmu_is_PMC(effective_sprn)) {
+        spr_pmu_read_PMC(ctx, gprn, effective_sprn);
+        return;
     }
+
+    t0 = tcg_temp_new();
 
     switch (effective_sprn) {
         case SPR_POWER_MMCR0:
@@ -609,7 +645,13 @@ void spr_write_pmu_ureg(DisasContext *ctx, int sprn, int gprn)
     } else {
         switch (effective_sprn) {
             case SPR_POWER_PMC1:
+            case SPR_POWER_PMC2:
+            case SPR_POWER_PMC3:
+            case SPR_POWER_PMC4:
+            case SPR_POWER_PMC5:
+            case SPR_POWER_PMC6:
                 gen_store_spr(effective_sprn, cpu_gpr[gprn]);
+                PMU_set_PMC(sprn, ctx->spr[sprn]);
                 break;
             case SPR_POWER_MMCR0:
                 /*

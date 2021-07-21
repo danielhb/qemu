@@ -19,7 +19,10 @@ void PMU_set_freeze_counters(bool fc);
 void PMU_set_freeze_PMC5PMC6(bool fc56);
 
 void PMU_instructions_completed(int num_insns);
-unsigned long PMU_get_PMC5(void);
+
+unsigned long PMU_get_PMC(int spr_power_pmc);
+void PMU_set_PMC(int spr_power_pmc, unsigned long val);
+
 unsigned long PMU_get_PMC6(void);
 void init_book3s_PMU(void);
 

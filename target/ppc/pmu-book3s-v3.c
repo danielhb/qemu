@@ -64,13 +64,59 @@ void PMU_instructions_completed(int num_insns)
     }
 }
 
-unsigned long PMU_get_PMC5(void)
-{
-    return pmuState.PMC5;
 
+unsigned long PMU_get_PMC(int spr_power_pmc)
+{
+    unsigned long val;
+
+    switch (spr_power_pmc) {
+    case SPR_POWER_PMC1:
+        val = pmuState.PMC1;
+        break;
+    case SPR_POWER_PMC2:
+        val = pmuState.PMC2;
+        break;
+    case SPR_POWER_PMC3:
+        val = pmuState.PMC3;
+        break;
+    case SPR_POWER_PMC4:
+        val = pmuState.PMC4;
+        break;
+    case SPR_POWER_PMC5:
+        val = pmuState.PMC5;
+        break;
+    case SPR_POWER_PMC6:
+        val = pmuState.PMC6;
+        break;
+    default:
+        val = 0;
+    }
+
+    return val;
 }
 
-unsigned long PMU_get_PMC6(void)
+void PMU_set_PMC(int spr_power_pmc, unsigned long val)
 {
-    return pmuState.PMC6;
+    switch (spr_power_pmc) {
+    case SPR_POWER_PMC1:
+        pmuState.PMC1 = val;
+        break;
+    case SPR_POWER_PMC2:
+        pmuState.PMC2 = val;
+        break;
+    case SPR_POWER_PMC3:
+        pmuState.PMC3 = val;
+        break;
+    case SPR_POWER_PMC4:
+        pmuState.PMC4 = val;
+        break;
+    case SPR_POWER_PMC5:
+        pmuState.PMC5 = val;
+        break;
+    case SPR_POWER_PMC6:
+        pmuState.PMC6 = val;
+        break;
+    default:
+        break;
+    }
 }
