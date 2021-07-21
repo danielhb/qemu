@@ -452,9 +452,30 @@ void spr_write_generic(DisasContext *ctx, int sprn, int gprn)
     spr_store_dump_spr(sprn);
 }
 
+static bool freeze_count = false;
+
 void spr_write_pmu_generic(DisasContext *ctx, int sprn, int gprn)
 {
+    TCGv t0;
+    TCGLabel *l;
+
+    if (sprn == SPR_POWER_MMCR0) {
+        printf("---- MMCR0 being set in spr_write_pmu_generic \n");
+        freeze_count = false;
+        l = gen_new_label();
+        t0 = tcg_temp_new();
+
+        tcg_gen_andi_tl(t0, cpu_gpr[gprn], MMCR0_FC);
+        tcg_gen_brcondi_i64(TCG_COND_EQ, t0, 1, l);
+        freeze_count = true;
+        printf("---- MMCR0 set FC = true spr_write_pmu_generic \n");
+
+        gen_set_label(l);
+        tcg_temp_free(t0);
+    }
+
     spr_write_generic(ctx, sprn, gprn);
+
 #if 0
     if (spr_pmu_is_PMC(sprn)) {
         PMU_set_PMC(sprn, ctx->spr[sprn]);
@@ -597,16 +618,22 @@ void spr_read_pmu_ureg(DisasContext *ctx, int gprn, int sprn)
     t0 = tcg_temp_new();
 
     switch (effective_sprn) {
+ 
         case SPR_POWER_MMCR0:
             /*
              * Filter out all bits but FC, PMAO, and PMAE, according
              * to ISA v3.1, in 10.4.4 Monitor Mode Control Register 0,
              * fourth paragraph.
              */
+            /* actually the ISA makes no mentions about not being able
+             * to read these registers, just writing them. skip this code and
+             * load the full MMCR0 value normally */           
+           /*
             gen_load_spr(t0, effective_sprn);
             tcg_gen_andi_tl(t0, t0, MMCR0_FC | MMCR0_PMAO | MMCR0_PMAE);
-            tcg_gen_mov_tl(cpu_gpr[gprn], t0);
-        break;
+            tcg_gen_mov_tl(cpu_gpr[gprn], t0);*/
+            gen_load_spr(cpu_gpr[gprn], effective_sprn);
+            break;
         case SPR_POWER_MMCR2:
             /* On read, filter out all bits that are not FCnP0 bits.
              * When MMCR0[PMCC] is set to 0b10 or 0b11, providing
@@ -645,6 +672,8 @@ void spr_write_pmu_ureg(DisasContext *ctx, int sprn, int gprn)
 
     int effective_sprn = sprn + 0x10;
 
+    printf("--- write PMU sprn %x, effective_sprn %x \n", sprn, sprn + 0x10);
+
     if (((ctx->spr[SPR_POWER_MMCR0] & MMCR0_PMCC) >> 18) == 0) {
         /* Hypervisor Emulation Assistance interrupt */
         gen_hvpriv_exception(ctx, POWERPC_EXCP_INVAL_SPR);
@@ -660,7 +689,7 @@ void spr_write_pmu_ureg(DisasContext *ctx, int sprn, int gprn)
                 // PMU_set_PMC(effective_sprn, ctx->spr[effective_sprn]);
                 break;
             case SPR_POWER_MMCR0:
-                 printf("----- ctx->spr[SPR_POWER_MMCR0] before ureg writing: %lx",
+                 printf("----- ctx->spr[SPR_POWER_MMCR0] before ureg writing: %lx \n",
                         ctx->spr[SPR_POWER_MMCR0]);
                 /*
                  * Filter out all bits but FC, PMAO, and PMAE, according
@@ -8728,15 +8757,15 @@ static void ppc_tr_tb_start(DisasContextBase *db, CPUState *cs)
 }
 
 
-static void PMU_inc_insns_count(CPUState *cs, int insns)
+static void PMU_inc_insns_count(int insns)
 {
     // DisasContext *ctx = container_of(dcbase, DisasContext, base);
-    CPUPPCState *env = cs->env_ptr;
+    // CPUPPCState *env = cs->env_ptr;
     TCGv t0 = tcg_temp_new();
     TCGv t1 = tcg_temp_new();
 
-    if (env->spr[SPR_POWER_MMCR0] & MMCR0_FC) {
-        return;
+    if (freeze_count) {
+        goto cleanup;
     }
 
     // increment PMC1 and PMC5
@@ -8748,6 +8777,7 @@ static void PMU_inc_insns_count(CPUState *cs, int insns)
     tcg_gen_addi_i64(t1, t1, insns);
     gen_store_spr(SPR_POWER_PMC5, t1);
 
+ cleanup:
     tcg_temp_free(t0);
     tcg_temp_free(t1);
 }
@@ -8757,6 +8787,7 @@ static void ppc_tr_insn_start(DisasContextBase *dcbase, CPUState *cs)
 {
     // PMU_inc_insns_count(cs);
     tcg_gen_insn_start(dcbase->pc_next);
+    PMU_inc_insns_count(1);
     //PMU_instructions_completed(1);
 }
 
@@ -8835,7 +8866,7 @@ static void ppc_tr_tb_stop(DisasContextBase *dcbase, CPUState *cs)
     target_ulong nip = ctx->base.pc_next;
     int sse;
 
-    PMU_inc_insns_count(cs, dcbase->num_insns);
+    // PMU_inc_insns_count(cs, dcbase->num_insns);
     // putting in this point counts too much instructions
     // PMU_instructions_completed(dcbase->num_insns);
 
