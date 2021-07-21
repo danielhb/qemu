@@ -79,6 +79,7 @@ unsigned long PMU_get_PMC(int spr_power_pmc)
         break;
     case SPR_POWER_PMC2:
         val = pmuState.PMC2;
+        printf("========= PMC2 from helper = %lu \n", val);
         break;
     case SPR_POWER_PMC3:
         val = pmuState.PMC3;
@@ -106,6 +107,7 @@ void PMU_set_PMC(int spr_power_pmc, unsigned long val)
         pmuState.PMC1 = val;
         break;
     case SPR_POWER_PMC2:
+        printf("========= setting PMC2 to %lu \n", val);
         pmuState.PMC2 = val;
         break;
     case SPR_POWER_PMC3:

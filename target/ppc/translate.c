@@ -651,7 +651,7 @@ void spr_write_pmu_ureg(DisasContext *ctx, int sprn, int gprn)
             case SPR_POWER_PMC5:
             case SPR_POWER_PMC6:
                 gen_store_spr(effective_sprn, cpu_gpr[gprn]);
-                PMU_set_PMC(sprn, ctx->spr[sprn]);
+                PMU_set_PMC(effective_sprn, ctx->spr[effective_sprn]);
                 break;
             case SPR_POWER_MMCR0:
                 /*
