@@ -58,6 +58,10 @@ void PMU_instructions_completed(int num_insns)
         return;
     }
 
+    // PMC1 count insns, PMC2 cycles (quick hack pmu kernel selftests
+    pmuState.PMC1 += num_insns;
+    pmuState.PMC2 += num_insns * 4;
+
     if (!pmuState.freeze_pmc5_pmc6) {
         pmuState.PMC5 += num_insns;
         pmuState.PMC6 += num_insns * 4;
