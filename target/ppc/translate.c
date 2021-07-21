@@ -388,6 +388,7 @@ void spr_read_generic(DisasContext *ctx, int gprn, int sprn)
     spr_load_dump_spr(sprn);
 }
 
+#if 0
 static bool spr_pmu_is_PMC(int sprn)
 {
     bool val = false;
@@ -407,10 +408,12 @@ static bool spr_pmu_is_PMC(int sprn)
 
     return val;
 }
+#endif
 
+#if 0
 static void spr_pmu_read_PMC(DisasContext *ctx, int gprn, int sprn)
 {
-#if 0
+
     TCGv t0 = tcg_temp_new();
 
     gen_load_spr(t0, sprn);
@@ -418,18 +421,19 @@ static void spr_pmu_read_PMC(DisasContext *ctx, int gprn, int sprn)
     tcg_gen_mov_tl(cpu_gpr[gprn], t0);
 
     tcg_temp_free(t0);
-#endif
+
     tcg_gen_movi_i64(cpu_gpr[gprn], PMU_get_PMC(sprn));
 }
-
+#endif
 
 void spr_read_pmu_generic(DisasContext *ctx, int gprn, int sprn)
 {
+#if 0
     if (spr_pmu_is_PMC(sprn)) {
         spr_pmu_read_PMC(ctx, gprn, sprn);
         return;
     }
-
+#endif
     spr_read_generic(ctx, gprn, sprn);
 }
 
@@ -451,11 +455,12 @@ void spr_write_generic(DisasContext *ctx, int sprn, int gprn)
 void spr_write_pmu_generic(DisasContext *ctx, int sprn, int gprn)
 {
     spr_write_generic(ctx, sprn, gprn);
-
+#if 0
     if (spr_pmu_is_PMC(sprn)) {
         PMU_set_PMC(sprn, ctx->spr[sprn]);
         return;
     }
+#endif
 }
 
 #if !defined(CONFIG_USER_ONLY)
@@ -583,11 +588,12 @@ void spr_read_pmu_ureg(DisasContext *ctx, int gprn, int sprn)
 
     printf("--- read PMU sprn %x, effective_sprn %x \n", sprn, sprn + 0x10);
 
+#if 0
     if (spr_pmu_is_PMC(effective_sprn)) {
         spr_pmu_read_PMC(ctx, gprn, effective_sprn);
         return;
     }
-
+#endif
     t0 = tcg_temp_new();
 
     switch (effective_sprn) {
@@ -651,7 +657,7 @@ void spr_write_pmu_ureg(DisasContext *ctx, int sprn, int gprn)
             case SPR_POWER_PMC5:
             case SPR_POWER_PMC6:
                 gen_store_spr(effective_sprn, cpu_gpr[gprn]);
-                PMU_set_PMC(effective_sprn, ctx->spr[effective_sprn]);
+                // PMU_set_PMC(effective_sprn, ctx->spr[effective_sprn]);
                 break;
             case SPR_POWER_MMCR0:
                  printf("----- ctx->spr[SPR_POWER_MMCR0] before ureg writing: %lx",
@@ -668,11 +674,11 @@ void spr_write_pmu_ureg(DisasContext *ctx, int sprn, int gprn)
                 tcg_gen_or_tl(t1, t1, t0); // Keep all other bits intact
                 gen_store_spr(effective_sprn, t1);
 
-                printf("----- ctx->spr[SPR_POWER_MMCR0] after ureg writing: %lx",
-                        ctx->spr[SPR_POWER_MMCR0]);
+                //printf("----- ctx->spr[SPR_POWER_MMCR0] after ureg writing: %lx",
+                  //      ctx->spr[SPR_POWER_MMCR0]);
 
-                PMU_set_freeze_counters(ctx->spr[SPR_POWER_MMCR0] & MMCR0_FC);
-                PMU_set_freeze_PMC5PMC6(ctx->spr[SPR_POWER_MMCR0] & MMCR0_FC56);
+                //PMU_set_freeze_counters(ctx->spr[SPR_POWER_MMCR0] & MMCR0_FC);
+                //PMU_set_freeze_PMC5PMC6(ctx->spr[SPR_POWER_MMCR0] & MMCR0_FC56);
                 break;
             default:
                 gen_store_spr(effective_sprn, cpu_gpr[gprn]);
@@ -8721,10 +8727,37 @@ static void ppc_tr_tb_start(DisasContextBase *db, CPUState *cs)
 {
 }
 
+
+static void PMU_inc_insns_count(CPUState *cs, int insns)
+{
+    // DisasContext *ctx = container_of(dcbase, DisasContext, base);
+    CPUPPCState *env = cs->env_ptr;
+    TCGv t0 = tcg_temp_new();
+    TCGv t1 = tcg_temp_new();
+
+    if (env->spr[SPR_POWER_MMCR0] & MMCR0_FC) {
+        return;
+    }
+
+    // increment PMC1 and PMC5
+    gen_load_spr(t0, SPR_POWER_PMC1);
+    tcg_gen_addi_i64(t0, t0, insns);
+    gen_store_spr(SPR_POWER_PMC1, t0);
+
+    gen_load_spr(t1, SPR_POWER_PMC5);
+    tcg_gen_addi_i64(t1, t1, insns);
+    gen_store_spr(SPR_POWER_PMC5, t1);
+
+    tcg_temp_free(t0);
+    tcg_temp_free(t1);
+}
+
+
 static void ppc_tr_insn_start(DisasContextBase *dcbase, CPUState *cs)
 {
+    // PMU_inc_insns_count(cs);
     tcg_gen_insn_start(dcbase->pc_next);
-    PMU_instructions_completed(1);
+    //PMU_instructions_completed(1);
 }
 
 static bool ppc_tr_breakpoint_check(DisasContextBase *dcbase, CPUState *cs,
@@ -8802,6 +8835,7 @@ static void ppc_tr_tb_stop(DisasContextBase *dcbase, CPUState *cs)
     target_ulong nip = ctx->base.pc_next;
     int sse;
 
+    PMU_inc_insns_count(cs, dcbase->num_insns);
     // putting in this point counts too much instructions
     // PMU_instructions_completed(dcbase->num_insns);
 
