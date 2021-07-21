@@ -410,6 +410,7 @@ static bool spr_pmu_is_PMC(int sprn)
 
 static void spr_pmu_read_PMC(DisasContext *ctx, int gprn, int sprn)
 {
+#if 0
     TCGv t0 = tcg_temp_new();
 
     gen_load_spr(t0, sprn);
@@ -417,6 +418,8 @@ static void spr_pmu_read_PMC(DisasContext *ctx, int gprn, int sprn)
     tcg_gen_mov_tl(cpu_gpr[gprn], t0);
 
     tcg_temp_free(t0);
+#endif
+    tcg_gen_movi_i64(cpu_gpr[gprn], PMU_get_PMC(sprn));
 }
 
 
@@ -453,9 +456,6 @@ void spr_write_pmu_generic(DisasContext *ctx, int sprn, int gprn)
         PMU_set_PMC(sprn, ctx->spr[sprn]);
         return;
     }
-
-    PMU_set_freeze_counters(ctx->spr[SPR_POWER_MMCR0] & MMCR0_FC);
-    PMU_set_freeze_PMC5PMC6(ctx->spr[SPR_POWER_MMCR0] & MMCR0_FC56);
 }
 
 #if !defined(CONFIG_USER_ONLY)
@@ -654,6 +654,8 @@ void spr_write_pmu_ureg(DisasContext *ctx, int sprn, int gprn)
                 PMU_set_PMC(effective_sprn, ctx->spr[effective_sprn]);
                 break;
             case SPR_POWER_MMCR0:
+                 printf("----- ctx->spr[SPR_POWER_MMCR0] before ureg writing: %lx",
+                        ctx->spr[SPR_POWER_MMCR0]);
                 /*
                  * Filter out all bits but FC, PMAO, and PMAE, according
                  * to ISA v3.1, in 10.4.4 Monitor Mode Control Register 0,
@@ -665,6 +667,9 @@ void spr_write_pmu_ureg(DisasContext *ctx, int sprn, int gprn)
                 tcg_gen_andi_tl(t1, t1, ~(MMCR0_FC | MMCR0_PMAO | MMCR0_PMAE));
                 tcg_gen_or_tl(t1, t1, t0); // Keep all other bits intact
                 gen_store_spr(effective_sprn, t1);
+
+                printf("----- ctx->spr[SPR_POWER_MMCR0] after ureg writing: %lx",
+                        ctx->spr[SPR_POWER_MMCR0]);
 
                 PMU_set_freeze_counters(ctx->spr[SPR_POWER_MMCR0] & MMCR0_FC);
                 PMU_set_freeze_PMC5PMC6(ctx->spr[SPR_POWER_MMCR0] & MMCR0_FC56);
@@ -8719,6 +8724,7 @@ static void ppc_tr_tb_start(DisasContextBase *db, CPUState *cs)
 static void ppc_tr_insn_start(DisasContextBase *dcbase, CPUState *cs)
 {
     tcg_gen_insn_start(dcbase->pc_next);
+    PMU_instructions_completed(1);
 }
 
 static bool ppc_tr_breakpoint_check(DisasContextBase *dcbase, CPUState *cs,
@@ -8796,7 +8802,8 @@ static void ppc_tr_tb_stop(DisasContextBase *dcbase, CPUState *cs)
     target_ulong nip = ctx->base.pc_next;
     int sse;
 
-    PMU_instructions_completed(dcbase->num_insns);
+    // putting in this point counts too much instructions
+    // PMU_instructions_completed(dcbase->num_insns);
 
     if (is_jmp == DISAS_NORETURN) {
         /* We have already exited the TB. */
