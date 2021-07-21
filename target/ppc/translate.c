@@ -8778,18 +8778,24 @@ static void ppc_tr_tb_start(DisasContextBase *db, CPUState *cs)
 }
 
 
-static void PMU_inc_insns_count(DisasContextBase *dcbase, int insns)
+//static void PMU_inc_insns_count(DisasContextBase *dcbase, int insns)
+static void PMU_inc_insns_count(CPUState *cs, int insns)
 {
-    DisasContext *ctx = container_of(dcbase, DisasContext, base);
-    // CPUPPCState *env = cs->env_ptr;
-    TCGv t0 = tcg_temp_new();
-    TCGv t1 = tcg_temp_new();
+    // DisasContext *ctx = container_of(dcbase, DisasContext, base);
+    CPUPPCState *env = cs->env_ptr;
+    // TCGv t0 = tcg_temp_new();
+    // TCGv t1 = tcg_temp_new();
 
-    if (ctx->spr[SPR_POWER_MMCR0] & MMCR0_FC) {
-        goto cleanup;
+    if (env->spr[SPR_POWER_MMCR0] & MMCR0_FC) {
+        // goto cleanup;
+        return;
     }
 
+    env->spr[SPR_POWER_PMC1] += insns;
+    env->spr[SPR_POWER_PMC5] += insns;
+
     // increment PMC1 and PMC5
+#if 0
     gen_load_spr(t0, SPR_POWER_PMC1);
     tcg_gen_addi_i64(t0, t0, insns);
     gen_store_spr(SPR_POWER_PMC1, t0);
@@ -8801,6 +8807,7 @@ static void PMU_inc_insns_count(DisasContextBase *dcbase, int insns)
  cleanup:
     tcg_temp_free(t0);
     tcg_temp_free(t1);
+#endif 
 }
 
 
@@ -8808,7 +8815,7 @@ static void ppc_tr_insn_start(DisasContextBase *dcbase, CPUState *cs)
 {
     // PMU_inc_insns_count(cs);
     tcg_gen_insn_start(dcbase->pc_next);
-    PMU_inc_insns_count(dcbase, 1);
+    PMU_inc_insns_count(cs, 1);
     //PMU_instructions_completed(1);
 }
 
