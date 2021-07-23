@@ -389,7 +389,21 @@ void spr_read_generic(DisasContext *ctx, int gprn, int sprn)
     spr_load_dump_spr(sprn);
 }
 
-#if 0
+static uint64_t instructions_get_count(void)
+{
+    return (uint64_t)icount_get_raw();
+}
+
+/*
+static int64_t instructions_ns_per(uint64_t icount)
+{
+    return icount_to_ns((int64_t)icount);
+}
+*/
+
+static bool global_frozen_count = false;
+static uint64_t start_fc_icount = 0;
+
 static bool spr_pmu_is_PMC(int sprn)
 {
     bool val = false;
@@ -409,32 +423,74 @@ static bool spr_pmu_is_PMC(int sprn)
 
     return val;
 }
-#endif
 
-#if 0
 static void spr_pmu_read_PMC(DisasContext *ctx, int gprn, int sprn)
 {
+    TCGv t0;
+    uint64_t curr_cycles, curr_insns;
 
-    TCGv t0 = tcg_temp_new();
+    // do nothing with these for now
+    if (sprn == SPR_POWER_PMC2 ||
+        sprn == SPR_POWER_PMC3 ||
+        sprn == SPR_POWER_PMC4) {
+        spr_read_generic(ctx, gprn, sprn);
+        return;
+    }
 
-    gen_load_spr(t0, sprn);
-    tcg_gen_movi_i64(t0, PMU_get_PMC(sprn));
-    tcg_gen_mov_tl(cpu_gpr[gprn], t0);
+    if (ctx->pmu_fc) {
+        spr_read_generic(ctx, gprn, sprn);
+        return;
+    }
+
+    t0 = tcg_temp_new();
+    curr_insns = instructions_get_count() - start_fc_icount;
+
+    /*
+     * update cycles by adding curr_insns and the existing
+     * set PMC value. We do not update the actual reg value
+     * in this step - just update cpu_gpr[gprn].
+     */
+    if (sprn == SPR_POWER_PMC2 || sprn == SPR_POWER_PMC5) {
+        gen_load_spr(t0, sprn);
+        tcg_gen_addi_tl(t0, t0, curr_insns);
+        tcg_gen_mov_tl(cpu_gpr[gprn], t0);
+    } else {
+        /*
+         * PMC6 contains the cycles. For now it's 4 times the
+         * number of instructions
+         */
+        curr_cycles = curr_insns * 4;
+
+        gen_load_spr(t0, sprn);
+        tcg_gen_addi_tl(t0, t0, curr_cycles);
+        tcg_gen_mov_tl(cpu_gpr[gprn], t0);
+
+    }
 
     tcg_temp_free(t0);
+}
 
-    tcg_gen_movi_i64(cpu_gpr[gprn], PMU_get_PMC(sprn));
+#if 0
+static int64_t cycles_ns_per(uint64_t cycles)
+{
+    return (ARM_CPU_FREQ / NANOSECONDS_PER_SECOND) * cycles;
+}
+
+
+
+static bool instructions_supported(CPUARMState *env)
+{
+    return icount_enabled() == 1; /* Precise instruction counting */
 }
 #endif
 
 void spr_read_pmu_generic(DisasContext *ctx, int gprn, int sprn)
 {
-#if 0
     if (spr_pmu_is_PMC(sprn)) {
         spr_pmu_read_PMC(ctx, gprn, sprn);
         return;
     }
-#endif
+
     spr_read_generic(ctx, gprn, sprn);
 }
 
@@ -630,7 +686,6 @@ void spr_read_pmu_ureg(DisasContext *ctx, int gprn, int sprn)
         return;
     }
 #endif
-    t0 = tcg_temp_new();
 
     switch (effective_sprn) {
  
@@ -659,16 +714,23 @@ void spr_read_pmu_ureg(DisasContext *ctx, int gprn, int sprn)
              * state, according to ISA v3.1, section 10.4.6 Monitor Mode
              * Control Register 2, p. 1316, third paragraph.
              */
+
+            t0 = tcg_temp_new();
+
             gen_load_spr(t0, effective_sprn);
             tcg_gen_andi_tl(t0, t0, 0x4020100804020000UL);
             tcg_gen_mov_tl(cpu_gpr[gprn], t0);
-        break;
-        default:
-            gen_load_spr(cpu_gpr[gprn], effective_sprn);
-        break;
-    }
 
-    tcg_temp_free(t0);
+            tcg_temp_free(t0);
+            break;
+        default:
+            if (spr_pmu_is_PMC(effective_sprn)) {
+                spr_pmu_read_PMC(ctx, gprn, sprn);
+                break;
+            }
+            gen_load_spr(cpu_gpr[gprn], effective_sprn);
+            break;
+    }
 }
 
 #if defined(TARGET_PPC64) && !defined(CONFIG_USER_ONLY)
@@ -8760,6 +8822,18 @@ static void ppc_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cs)
     }
 
     ctx->pmu_fc = env->spr[SPR_POWER_MMCR0] & MMCR0_FC;
+    if (ctx->pmu_fc != global_frozen_count) {
+        /*
+         * If global was frozen but now the PMU is running, set
+         * start_fc_icount to be used to calculate instructions
+         * and cycles.
+         */
+        if (global_frozen_count && !ctx->pmu_fc) {
+            start_fc_icount = instructions_get_count();
+        }
+
+        global_frozen_count = ctx->pmu_fc;
+    }
 
     // always force single step -> this is so slow that it's just better to enable icount
     // ctx->base.max_insns = 1;
@@ -8769,7 +8843,7 @@ static void ppc_tr_tb_start(DisasContextBase *db, CPUState *cs)
 {
 }
 
-
+/*
 static void PMU_inc_insns_count(DisasContextBase *dcbase, CPUState *cs)
 {
     DisasContext *ctx = container_of(dcbase, DisasContext, base);
@@ -8783,7 +8857,7 @@ static void PMU_inc_insns_count(DisasContextBase *dcbase, CPUState *cs)
     env->spr[SPR_POWER_PMC1] += insns;
     env->spr[SPR_POWER_PMC5] += insns;
 }
-
+*/
 
 static void ppc_tr_insn_start(DisasContextBase *dcbase, CPUState *cs)
 {
@@ -8880,7 +8954,7 @@ static void ppc_tr_tb_stop(DisasContextBase *dcbase, CPUState *cs)
         return;
     }
 
-    PMU_inc_insns_count(dcbase, cs);
+    // PMU_inc_insns_count(dcbase, cs);
     // PMU_inc_insns_count(dcbase->num_insns);
 
     /* Honor single stepping. */
