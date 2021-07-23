@@ -183,6 +183,7 @@ struct DisasContext {
     uint32_t flags;
     uint64_t insns_flags;
     uint64_t insns_flags2;
+    bool pmu_fc;
 };
 
 #define DISAS_EXIT         DISAS_TARGET_0  /* exit to main loop, pc updated */
@@ -486,29 +487,9 @@ void spr_write_pmu_generic(DisasContext *ctx, int sprn, int gprn)
 #endif
 }
 
-static bool freeze_count_MMCR0 = false;
-
 void spr_write_book3s_MMCR0(DisasContext *ctx, int sprn, int gprn)
 {
-    TCGLabel *l_cont = gen_new_label();
-    TCGLabel *l_unfreeze = gen_new_label();
-    TCGv t_mmcr0 = tcg_temp_new();
-
     spr_write_generic(ctx, sprn, gprn);
-
-    gen_load_spr(t_mmcr0, SPR_POWER_MMCR0);
-    tcg_gen_andi_tl(t_mmcr0, t_mmcr0, MMCR0_FC);
-    tcg_gen_brcondi_i64(TCG_COND_EQ, t_mmcr0, 0, l_unfreeze);
-    printf("====== FC is set to true in spr_write_book3s_MMCR0 \n");
-    freeze_count_MMCR0 = true;
-    tcg_gen_br(l_cont);
-    
-    gen_set_label(l_unfreeze);
-    printf("====== FC is set to false in spr_write_book3s_MMCR0 \n");
-    freeze_count_MMCR0 = false;
-
-    gen_set_label(l_cont);
-
     /*
      * writing MMCR0 can cause counter freeze, so stop translation
      * 
@@ -516,7 +497,6 @@ void spr_write_book3s_MMCR0(DisasContext *ctx, int sprn, int gprn)
      * something .....
      */
     ctx->base.is_jmp = DISAS_EXIT_UPDATE;
-    tcg_temp_free(t_mmcr0);
 }
 
 #if !defined(CONFIG_USER_ONLY)
@@ -699,17 +679,10 @@ void spr_write_ureg(DisasContext *ctx, int sprn, int gprn)
 
 void spr_write_book3s_UMMCR0(DisasContext *ctx, int sprn, int gprn)
 {
-    TCGLabel *l_cont = gen_new_label();
-    TCGLabel *l_unfreeze = gen_new_label();
-    TCGv t_mmcr0 = tcg_temp_new();
     TCGv t0 = tcg_temp_new();
     TCGv t1 = tcg_temp_new();
 
     int effective_sprn = sprn + 0x10;
-
-
-    // printf("=========== entered spr_write_book3s_UMMCR0, ctx->spr[SPR_POWER_MMCR0] before ureg "
-    //       "writing: %lx \n", ctx->spr[SPR_POWER_MMCR0]);
 
     /*
      * Filter out all bits but FC, PMAO, and PMAE, according
@@ -723,33 +696,9 @@ void spr_write_book3s_UMMCR0(DisasContext *ctx, int sprn, int gprn)
     tcg_gen_or_tl(t1, t1, t0); // Keep all other bits intact
     gen_store_spr(effective_sprn, t1);
 
-    gen_load_spr(t_mmcr0, effective_sprn);
-    tcg_gen_andi_tl(t_mmcr0, t_mmcr0, MMCR0_FC);
-    tcg_gen_brcondi_tl(TCG_COND_EQ, t_mmcr0, 0, l_unfreeze);
-    freeze_count_MMCR0 = true;
-    printf("---- MMCR0 set FC = true spr_write_book3s_UMMCR0 \n");
+    tcg_temp_free(t0);
+    tcg_temp_free(t1);
 
-    tcg_gen_br(l_cont);
-    
-    gen_set_label(l_unfreeze);
-        printf("---- MMCR0 set FC = false spr_write_book3s_UMMCR0 \n");
-    freeze_count_MMCR0 = false;
-
-    gen_set_label(l_cont);
-
-#if 0                
-                freeze_count = false;
-                l = gen_new_label();
-                t2 = tcg_temp_new();
-
-                tcg_gen_andi_tl(t2, cpu_gpr[gprn], MMCR0_FC);
-                tcg_gen_brcondi_i64(TCG_COND_NE, t2, 0, l);
-                freeze_count = true;
-                printf("---- MMCR0 set FC = true spr_write_pmu_ureg \n");
-
-                gen_set_label(l);
-                tcg_temp_free(t2);
-#endif
     /*
      * writing MMCR0 can cause counter freeze, so stop translation
      * 
@@ -757,10 +706,6 @@ void spr_write_book3s_UMMCR0(DisasContext *ctx, int sprn, int gprn)
      * something .....
      */
     ctx->base.is_jmp = DISAS_EXIT_UPDATE;
-
-    tcg_temp_free(t0);
-    tcg_temp_free(t1);
-    tcg_temp_free(t_mmcr0);
 }
 
 /* User special write access to SPR  */
@@ -768,15 +713,7 @@ void spr_write_book3s_UMMCR0(DisasContext *ctx, int sprn, int gprn)
 /* PMC1 */
 void spr_write_pmu_ureg(DisasContext *ctx, int sprn, int gprn)
 {
-    TCGv t0 = tcg_temp_new();
-    TCGv t1 = tcg_temp_new();
-
-    // TCGv t2;
-    // TCGLabel *l;
-
     int effective_sprn = sprn + 0x10;
-
-    printf("--- write PMU sprn %x, effective_sprn %x \n", sprn, sprn + 0x10);
 
 #if 0
     if (((ctx->spr[SPR_POWER_MMCR0] & MMCR0_PMCC) >> 18) == 0) {
@@ -784,58 +721,7 @@ void spr_write_pmu_ureg(DisasContext *ctx, int sprn, int gprn)
         gen_hvpriv_exception(ctx, POWERPC_EXCP_INVAL_SPR);
     }
 #endif
-    
-    switch (effective_sprn) {
-            case SPR_POWER_PMC1:
-            case SPR_POWER_PMC2:
-            case SPR_POWER_PMC3:
-            case SPR_POWER_PMC4:
-            case SPR_POWER_PMC5:
-            case SPR_POWER_PMC6:
-                gen_store_spr(effective_sprn, cpu_gpr[gprn]);
-                // PMU_set_PMC(effective_sprn, ctx->spr[effective_sprn]);
-                break;
-            case SPR_POWER_MMCR0:
-                 printf("----- ctx->spr[SPR_POWER_MMCR0] before ureg writing: %lx \n",
-                        ctx->spr[SPR_POWER_MMCR0]);
-#if 0                
-                freeze_count = false;
-                l = gen_new_label();
-                t2 = tcg_temp_new();
-
-                tcg_gen_andi_tl(t2, cpu_gpr[gprn], MMCR0_FC);
-                tcg_gen_brcondi_i64(TCG_COND_NE, t2, 0, l);
-                freeze_count = true;
-                printf("---- MMCR0 set FC = true spr_write_pmu_ureg \n");
-
-                gen_set_label(l);
-                tcg_temp_free(t2);
-#endif
-                /*
-                 * Filter out all bits but FC, PMAO, and PMAE, according
-                 * to ISA v3.1, in 10.4.4 Monitor Mode Control Register 0,
-                 * fourth paragraph.
-                 */
-                tcg_gen_andi_tl(t0, cpu_gpr[gprn],
-                                MMCR0_FC | MMCR0_PMAO | MMCR0_PMAE);
-                gen_load_spr(t1, SPR_POWER_MMCR0);
-                tcg_gen_andi_tl(t1, t1, ~(MMCR0_FC | MMCR0_PMAO | MMCR0_PMAE));
-                tcg_gen_or_tl(t1, t1, t0); // Keep all other bits intact
-                gen_store_spr(effective_sprn, t1);
-
-                //printf("----- ctx->spr[SPR_POWER_MMCR0] after ureg writing: %lx",
-                  //      ctx->spr[SPR_POWER_MMCR0]);
-
-                //PMU_set_freeze_counters(ctx->spr[SPR_POWER_MMCR0] & MMCR0_FC);
-                //PMU_set_freeze_PMC5PMC6(ctx->spr[SPR_POWER_MMCR0] & MMCR0_FC56);
-                break;
-            default:
-                gen_store_spr(effective_sprn, cpu_gpr[gprn]);
-                break;
-        }
-    
-    tcg_temp_free(t0);
-    tcg_temp_free(t1);
+    gen_store_spr(effective_sprn, cpu_gpr[gprn]);
 }
 
 #endif
@@ -8873,6 +8759,8 @@ static void ppc_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cs)
         ctx->base.max_insns = 1;
     }
 
+    ctx->pmu_fc = env->spr[SPR_POWER_MMCR0] & MMCR0_FC;
+
     // always force single step -> this is so slow that it's just better to enable icount
     // ctx->base.max_insns = 1;
 }
@@ -8882,57 +8770,28 @@ static void ppc_tr_tb_start(DisasContextBase *db, CPUState *cs)
 }
 
 
-//static void PMU_inc_insns_count(DisasContextBase *dcbase, int insns)
-static bool freeze_count = false;
-static void PMU_inc_insns_count(CPUState *cs, int insns)
-//static void PMU_inc_insns_count(int insns)
+static void PMU_inc_insns_count(DisasContextBase *dcbase, CPUState *cs)
 {
-    // DisasContext *ctx = container_of(dcbase, DisasContext, base);
+    DisasContext *ctx = container_of(dcbase, DisasContext, base);
     CPUPPCState *env = cs->env_ptr;
-    // bool FC = env->spr[SPR_POWER_MMCR0] & MMCR0_FC;
-    // TCGv tPMC1 = tcg_temp_new();
-    // TCGv tPMC5 = tcg_temp_new();
+    int insns = dcbase->num_insns;
 
-    if (freeze_count != freeze_count_MMCR0) {
-        printf("------ FC changed state: previous %d, now set %d \n",
-               freeze_count, freeze_count_MMCR0);
-        freeze_count = freeze_count_MMCR0;
-    }
-
-    if (freeze_count) {
+    if (ctx->pmu_fc) {
         return;
     }
 
     env->spr[SPR_POWER_PMC1] += insns;
     env->spr[SPR_POWER_PMC5] += insns;
-
-    // increment PMC1 and PMC5
-#if 0
-    gen_load_spr(tPMC1, SPR_POWER_PMC1);
-    tcg_gen_addi_i64(tPMC1, tPMC1, insns);
-    gen_store_spr(SPR_POWER_PMC1, tPMC1);
-
-    gen_load_spr(tPMC5, SPR_POWER_PMC5);
-    tcg_gen_addi_i64(tPMC5, tPMC5, insns);
-    gen_store_spr(SPR_POWER_PMC5, tPMC5);
-#endif
- // cleanup:
-    // tcg_temp_free(tPMC1);
-    // tcg_temp_free(tPMC5);
- 
 }
 
 
 static void ppc_tr_insn_start(DisasContextBase *dcbase, CPUState *cs)
 {
-    // PMU_inc_insns_count(cs);
     tcg_gen_insn_start(dcbase->pc_next);
-
 
     /*
      * putting this here seems too early to fetch the changes in FC
      */
-
     //PMU_inc_insns_count(cs, 1);
     //PMU_instructions_completed(1);
 }
@@ -9021,7 +8880,7 @@ static void ppc_tr_tb_stop(DisasContextBase *dcbase, CPUState *cs)
         return;
     }
 
-    PMU_inc_insns_count(cs, dcbase->num_insns);
+    PMU_inc_insns_count(dcbase, cs);
     // PMU_inc_insns_count(dcbase->num_insns);
 
     /* Honor single stepping. */
