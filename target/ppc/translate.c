@@ -424,6 +424,24 @@ static bool spr_pmu_is_PMC(int sprn)
     return val;
 }
 
+/*
+ * Set PMC values when the PMU is getting frozen.
+ */
+static void pmu_set_PMCs_FC_state(DisasContext *ctx)
+{
+    uint64_t curr_insns = instructions_get_count() - start_fc_icount;
+    uint64_t curr_cycles = curr_insns * 4;
+
+    printf("======== debug: pmc2 = %lx, pmc5 = %lx \n",
+           ctx->spr[SPR_POWER_PMC2] , ctx->spr[SPR_POWER_PMC5]);
+
+    ctx->spr[SPR_POWER_PMC2] += curr_insns;
+    ctx->spr[SPR_POWER_PMC5] += curr_insns;
+    ctx->spr[SPR_POWER_PMC6] += curr_cycles;
+
+    start_fc_icount += curr_insns;
+}
+
 static void spr_pmu_read_PMC(DisasContext *ctx, int gprn, int sprn)
 {
     TCGv t0;
@@ -447,13 +465,17 @@ static void spr_pmu_read_PMC(DisasContext *ctx, int gprn, int sprn)
 
     /*
      * update cycles by adding curr_insns and the existing
-     * set PMC value. We do not update the actual reg value
-     * in this step - just update cpu_gpr[gprn].
+     * set PMC value. Set PMC values to avoid a situation
+     * where the FC changed in the same translation block
+     * of a reading, messing up the reg value.
      */
     if (sprn == SPR_POWER_PMC2 || sprn == SPR_POWER_PMC5) {
         gen_load_spr(t0, sprn);
         tcg_gen_addi_tl(t0, t0, curr_insns);
         tcg_gen_mov_tl(cpu_gpr[gprn], t0);
+        // update PMC value and start_fc_icount as well
+        gen_store_spr(sprn, t0);
+        start_fc_icount += curr_insns; 
     } else {
         /*
          * PMC6 contains the cycles. For now it's 4 times the
@@ -464,6 +486,11 @@ static void spr_pmu_read_PMC(DisasContext *ctx, int gprn, int sprn)
         gen_load_spr(t0, sprn);
         tcg_gen_addi_tl(t0, t0, curr_cycles);
         tcg_gen_mov_tl(cpu_gpr[gprn], t0);
+        // update PMC value and start_fc_icount as well
+        // TODO: this will break the readings from PMC5 - need a
+        // count for each register.
+        gen_store_spr(sprn, t0);
+        start_fc_icount += curr_insns; 
 
     }
 
@@ -8830,6 +8857,15 @@ static void ppc_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cs)
          */
         if (global_frozen_count && !ctx->pmu_fc) {
             start_fc_icount = instructions_get_count();
+        }
+
+        /*
+         * If we were running (global not frozen) but now we're
+         * freezing the PMU, update the values of PMCs that we
+         * weren't updating so far.
+         */
+        if (!global_frozen_count && ctx->pmu_fc) {
+            pmu_set_PMCs_FC_state(ctx);
         }
 
         global_frozen_count = ctx->pmu_fc;
