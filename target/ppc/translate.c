@@ -401,8 +401,16 @@ static int64_t instructions_ns_per(uint64_t icount)
 }
 */
 
-static bool global_frozen_count = false;
-static uint64_t start_fc_icount = 0;
+struct PMUState {
+    bool global_frozen_count;
+    uint64_t base_pmc1_fc_icount;
+    uint64_t base_pmc2_fc_icount;
+    uint64_t base_pmc5_fc_icount;
+    uint64_t base_pmc6_fc_icount;
+};
+
+static PMUState pmu_state;
+
 
 static bool spr_pmu_is_PMC(int sprn)
 {
@@ -561,6 +569,14 @@ void spr_write_pmu_generic(DisasContext *ctx, int sprn, int gprn)
 #endif
 
     spr_write_generic(ctx, sprn, gprn);
+
+    /*
+     * When writing a PMC we must also set the base icount, so the
+     * current insns count will be relative to this value.
+     */
+    if (spr_pmu_is_PMC(sprn)) {
+        start_fc_icount = instructions_get_count();
+    }
 
 #if 0
     if (spr_pmu_is_PMC(sprn)) {
@@ -811,6 +827,14 @@ void spr_write_pmu_ureg(DisasContext *ctx, int sprn, int gprn)
     }
 #endif
     gen_store_spr(effective_sprn, cpu_gpr[gprn]);
+
+    /*
+     * When writing a PMC we must also set the base icount, so the
+     * current insns count will be relative to this value.
+     */
+    if (spr_pmu_is_PMC(effective_sprn)) {
+        start_fc_icount = instructions_get_count();
+    }
 }
 
 #endif
@@ -5325,7 +5349,6 @@ static void gen_mtspr(DisasContext *ctx)
             qemu_log_mask(LOG_GUEST_ERROR, "Trying to write privileged spr "
                           "%d (0x%03x) at " TARGET_FMT_lx "\n", sprn, sprn,
                           ctx->cia);
-            printf("---- gen_mtspr, privilege exception \n");
             gen_priv_exception(ctx, POWERPC_EXCP_PRIV_REG);
         }
     } else {
@@ -5341,8 +5364,6 @@ static void gen_mtspr(DisasContext *ctx)
         qemu_log_mask(LOG_GUEST_ERROR,
                       "Trying to write invalid spr %d (0x%03x) at "
                       TARGET_FMT_lx "\n", sprn, sprn, ctx->cia);
-
-        printf("---- gen_mtspr, not defined \n");
 
         /*
          * The behaviour depends on MSR:PR and SPR# bit 0x10, it can
@@ -8849,14 +8870,17 @@ static void ppc_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cs)
     }
 
     ctx->pmu_fc = env->spr[SPR_POWER_MMCR0] & MMCR0_FC;
-    if (ctx->pmu_fc != global_frozen_count) {
+    if (ctx->pmu_fc != pmu_state.global_frozen_count) {
         /*
          * If global was frozen but now the PMU is running, set
          * start_fc_icount to be used to calculate instructions
          * and cycles.
          */
-        if (global_frozen_count && !ctx->pmu_fc) {
-            start_fc_icount = instructions_get_count();
+        if (pmu_state.global_frozen_count && !ctx->pmu_fc) {
+            pmu_state.base_pmc1_fc_icount = instructions_get_count();
+            pmu_state.base_pmc2_fc_icount = instructions_get_count();
+            pmu_state.base_pmc5_fc_icount = instructions_get_count();
+            pmu_state.base_pmc6_fc_icount = instructions_get_count();
         }
 
         /*
@@ -8864,11 +8888,11 @@ static void ppc_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cs)
          * freezing the PMU, update the values of PMCs that we
          * weren't updating so far.
          */
-        if (!global_frozen_count && ctx->pmu_fc) {
+        if (!pmu_state.global_frozen_count && ctx->pmu_fc) {
             pmu_set_PMCs_FC_state(ctx);
         }
 
-        global_frozen_count = ctx->pmu_fc;
+        pmu_state.global_frozen_count = ctx->pmu_fc;
     }
 
     // always force single step -> this is so slow that it's just better to enable icount
