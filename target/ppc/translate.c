@@ -388,7 +388,23 @@ void spr_read_generic(DisasContext *ctx, int gprn, int sprn)
 
 void spr_read_pmu_generic(DisasContext *ctx, int gprn, int sprn)
 {
-    /* For now it's just a call to spr_read_generic() */
+    TCGv t_ret;
+    TCGv_i32 t_sprn;
+
+    gen_icount_io_start(ctx);
+
+    if (sprn == SPR_POWER_PMC5 || sprn == SPR_POWER_PMC6) {
+        t_ret = tcg_temp_new();
+        t_sprn = tcg_const_i32(sprn);
+
+        gen_helper_get_PMC_value(t_ret, cpu_env, t_sprn);
+        tcg_gen_mov_tl(cpu_gpr[gprn], t_ret);
+
+        tcg_temp_free(t_ret);
+        tcg_temp_free_i32(t_sprn);
+        return;
+    }
+
     spr_read_generic(ctx, gprn, sprn);
 }
 
@@ -409,8 +425,27 @@ void spr_write_generic(DisasContext *ctx, int sprn, int gprn)
 
 void spr_write_pmu_generic(DisasContext *ctx, int sprn, int gprn)
 {
-    /* For now it's just a call to spr_write_generic() */
-    spr_write_generic(ctx, sprn, gprn);
+    TCGv_i32 t_sprn;
+
+    gen_icount_io_start(ctx);
+
+    switch (sprn) {
+        case SPR_POWER_MMCR0:
+            gen_helper_store_mmcr0(cpu_env, cpu_gpr[gprn]);
+
+            /* Must stop the translation as PMC state (may have) changed */
+            ctx->base.is_jmp = DISAS_EXIT_UPDATE;
+            break;
+        case SPR_POWER_PMC5:
+        case SPR_POWER_PMC6:
+            t_sprn = tcg_const_i32(sprn);
+            gen_helper_store_PMC_value(cpu_env, t_sprn, cpu_gpr[gprn]);
+            tcg_temp_free_i32(t_sprn);
+            break;
+        default:
+            spr_write_generic(ctx, sprn, gprn);
+    }
+
 }
 
 #if !defined(CONFIG_USER_ONLY)
@@ -534,7 +569,10 @@ void spr_read_ureg(DisasContext *ctx, int gprn, int sprn)
 void spr_read_pmu_ureg(DisasContext *ctx, int gprn, int sprn)
 {
     TCGv t0 = tcg_temp_new();
+    TCGv_i32 t_sprn;
     int effective_sprn = sprn + 0x10;
+
+    gen_icount_io_start(ctx);
 
     switch (effective_sprn) {
         case SPR_POWER_MMCR2:
@@ -550,6 +588,15 @@ void spr_read_pmu_ureg(DisasContext *ctx, int gprn, int sprn)
             gen_load_spr(t0, effective_sprn);
             tcg_gen_andi_tl(t0, t0, 0x4020100804020000UL);
             tcg_gen_mov_tl(cpu_gpr[gprn], t0);
+            break;
+        case SPR_POWER_PMC5:
+        case SPR_POWER_PMC6:
+            t_sprn = tcg_const_i32(effective_sprn);
+
+            gen_helper_get_PMC_value(t0, cpu_env, t_sprn);
+            tcg_gen_mov_tl(cpu_gpr[gprn], t0);
+
+            tcg_temp_free_i32(t_sprn);
             break;
         default:
             gen_load_spr(cpu_gpr[gprn], effective_sprn);
@@ -569,11 +616,12 @@ void spr_write_ureg(DisasContext *ctx, int sprn, int gprn)
 /* PMC1 */
 void spr_write_pmu_ureg(DisasContext *ctx, int sprn, int gprn)
 {
-    TCGv t0 = tcg_temp_new();
-    TCGv t1 = tcg_temp_new();
+    TCGv t0, t1;
+    TCGv_i32 t_sprn;
 
     int effective_sprn = sprn + 0x10;
 
+    gen_icount_io_start(ctx);
     /* TODO: add this back when we're solid with the rest of the logic */
 #if 0
     if (((ctx->spr[SPR_POWER_MMCR0] & MMCR0_PMCC) >> 18) == 0) {
@@ -584,10 +632,10 @@ void spr_write_pmu_ureg(DisasContext *ctx, int sprn, int gprn)
 #endif
 
     switch (effective_sprn) {
-        case SPR_POWER_PMC1:
-            gen_store_spr(effective_sprn, cpu_gpr[gprn]);
-            break;
         case SPR_POWER_MMCR0:
+            t0 = tcg_temp_new();
+            t1 = tcg_temp_new();
+
             /*
              * Filter out all bits but FC, PMAO, and PMAE, according
              * to ISA v3.1, in 10.4.4 Monitor Mode Control Register 0,
@@ -598,15 +646,24 @@ void spr_write_pmu_ureg(DisasContext *ctx, int sprn, int gprn)
             gen_load_spr(t1, SPR_POWER_MMCR0);
             tcg_gen_andi_tl(t1, t1, ~(MMCR0_FC | MMCR0_PMAO | MMCR0_PMAE));
             tcg_gen_or_tl(t1, t1, t0); // Keep all other bits intact
-            gen_store_spr(effective_sprn, t1);
+
+            gen_helper_store_mmcr0(cpu_env, t1);
+            /* Must stop the translation as PMC state (may have) changed */
+            ctx->base.is_jmp = DISAS_EXIT_UPDATE;
+
+            tcg_temp_free(t0);
+            tcg_temp_free(t1);
+            break;
+        case SPR_POWER_PMC5:
+        case SPR_POWER_PMC6:
+            t_sprn = tcg_const_i32(effective_sprn);
+            gen_helper_store_PMC_value(cpu_env, t_sprn, cpu_gpr[gprn]);
+            tcg_temp_free_i32(t_sprn);
             break;
         default:
             gen_store_spr(effective_sprn, cpu_gpr[gprn]);
             break;
     }
-
-    tcg_temp_free(t0);
-    tcg_temp_free(t1);
 }
 
 #endif
