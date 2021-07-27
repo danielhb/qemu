@@ -54,6 +54,45 @@ static void update_PMC_PM_CYC(CPUPPCState *env, int sprn,
     env->spr[sprn] += cycles_get_count(insns);
 }
 
+static void update_programmable_PMC_reg(CPUPPCState *env, int sprn,
+                                        uint64_t curr_icount)
+{
+    int event;
+
+    switch(sprn) {
+        case SPR_POWER_PMC1:
+            event = MMCR1_PMC1SEL & env->spr[SPR_POWER_MMCR1];
+            event = event >> MMCR1_PMC1SEL_SHIFT;
+            break;
+        case SPR_POWER_PMC2:
+            event = MMCR1_PMC2SEL & env->spr[SPR_POWER_MMCR1];
+            event = event >> MMCR1_PMC2SEL_SHIFT;
+            break;
+        case SPR_POWER_PMC3:
+            event = MMCR1_PMC3SEL & env->spr[SPR_POWER_MMCR1];
+            event = event >> MMCR1_PMC3SEL_SHIFT;
+            break;
+        case SPR_POWER_PMC4:
+            event = MMCR1_PMC4SEL & env->spr[SPR_POWER_MMCR1];
+            break;
+        default:
+            return;
+    }
+
+    // printf("---- mmcr1 = %lx , event = %x \n", env->spr[SPR_POWER_MMCR1], event);
+
+    switch (event) {
+        case 0x2:
+            update_PMC_PM_INST_CMPL(env, sprn, curr_icount);
+            break;
+        case 0x1E:
+            update_PMC_PM_CYC(env, sprn, curr_icount);
+            break;
+        default:
+            return;
+    }
+}
+
 /*
  * Set all PMCs values after a PMU freeze via MMCR0_FC.
  *
@@ -63,6 +102,11 @@ static void update_PMC_PM_CYC(CPUPPCState *env, int sprn,
 static void update_PMCs_on_freeze(CPUPPCState *env)
 {
     uint64_t curr_icount = insns_get_count(env);
+    int sprn;
+
+    for (sprn = SPR_POWER_PMC1; sprn < SPR_POWER_PMC5; sprn++) {
+        update_programmable_PMC_reg(env, sprn, curr_icount);
+    }
 
     update_PMC_PM_INST_CMPL(env, SPR_POWER_PMC5, curr_icount);
     update_PMC_PM_CYC(env, SPR_POWER_PMC6, curr_icount);
@@ -93,6 +137,7 @@ static void update_PMC_reg(CPUPPCState *env, int sprn)
         case SPR_POWER_PMC2:
         case SPR_POWER_PMC3:
         case SPR_POWER_PMC4:
+            update_programmable_PMC_reg(env, sprn, curr_icount);
             break;
 
         case SPR_POWER_PMC5:

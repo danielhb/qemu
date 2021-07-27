@@ -393,19 +393,26 @@ void spr_read_pmu_generic(DisasContext *ctx, int gprn, int sprn)
 
     gen_icount_io_start(ctx);
 
-    if (sprn == SPR_POWER_PMC5 || sprn == SPR_POWER_PMC6) {
-        t_ret = tcg_temp_new();
-        t_sprn = tcg_const_i32(sprn);
+    switch (sprn) {
+        case SPR_POWER_PMC1:
+        case SPR_POWER_PMC2:
+        case SPR_POWER_PMC3:
+        case SPR_POWER_PMC4:
+        case SPR_POWER_PMC5:
+        case SPR_POWER_PMC6:
+            t_ret = tcg_temp_new();
+            t_sprn = tcg_const_i32(sprn);
 
-        gen_helper_get_PMC_value(t_ret, cpu_env, t_sprn);
-        tcg_gen_mov_tl(cpu_gpr[gprn], t_ret);
+            gen_helper_get_PMC_value(t_ret, cpu_env, t_sprn);
+            tcg_gen_mov_tl(cpu_gpr[gprn], t_ret);
 
-        tcg_temp_free(t_ret);
-        tcg_temp_free_i32(t_sprn);
-        return;
+            tcg_temp_free(t_ret);
+            tcg_temp_free_i32(t_sprn);
+            break;
+
+        default:
+            spr_read_generic(ctx, gprn, sprn);
     }
-
-    spr_read_generic(ctx, gprn, sprn);
 }
 
 static void spr_store_dump_spr(int sprn)
@@ -436,6 +443,10 @@ void spr_write_pmu_generic(DisasContext *ctx, int sprn, int gprn)
             /* Must stop the translation as PMC state (may have) changed */
             ctx->base.is_jmp = DISAS_EXIT_UPDATE;
             break;
+        case SPR_POWER_PMC1:
+        case SPR_POWER_PMC2:
+        case SPR_POWER_PMC3:
+        case SPR_POWER_PMC4:
         case SPR_POWER_PMC5:
         case SPR_POWER_PMC6:
             t_sprn = tcg_const_i32(sprn);
@@ -589,6 +600,10 @@ void spr_read_pmu_ureg(DisasContext *ctx, int gprn, int sprn)
             tcg_gen_andi_tl(t0, t0, 0x4020100804020000UL);
             tcg_gen_mov_tl(cpu_gpr[gprn], t0);
             break;
+        case SPR_POWER_PMC1:
+        case SPR_POWER_PMC2:
+        case SPR_POWER_PMC3:
+        case SPR_POWER_PMC4:
         case SPR_POWER_PMC5:
         case SPR_POWER_PMC6:
             t_sprn = tcg_const_i32(effective_sprn);
@@ -654,6 +669,10 @@ void spr_write_pmu_ureg(DisasContext *ctx, int sprn, int gprn)
             tcg_temp_free(t0);
             tcg_temp_free(t1);
             break;
+        case SPR_POWER_PMC1:
+        case SPR_POWER_PMC2:
+        case SPR_POWER_PMC3:
+        case SPR_POWER_PMC4:
         case SPR_POWER_PMC5:
         case SPR_POWER_PMC6:
             t_sprn = tcg_const_i32(effective_sprn);
