@@ -44,9 +44,9 @@ static void update_PMCs_on_freeze(CPUPPCState *env)
 {
     uint64_t curr_icount = insns_get_count(env);
 
-    env->spr[SPR_POWER_PMC5] += curr_icount - env->pmc5_base_icount;
+    env->spr[SPR_POWER_PMC5] += curr_icount - env->pmc_base_icount[4];
     env->spr[SPR_POWER_PMC6] += cycles_get_count(curr_icount -
-                                                 env->pmc6_base_icount);
+                                                 env->pmc_base_icount[5]);
 }
 
 /*
@@ -57,11 +57,17 @@ static void update_PMCs_on_freeze(CPUPPCState *env)
  */
 static void update_PMC_reg(CPUPPCState *env, int sprn)
 {
-    uint64_t insns;
+    uint64_t insns, curr_icount;
+    int pmc_idx;
 
     if (pmu_global_freeze(env)) {
         return;
     }
+
+    g_assert(sprn >= SPR_POWER_PMC1 && sprn < (SPR_POWER_PMC6 + 1));
+
+    curr_icount = insns_get_count(env);
+    pmc_idx = sprn - SPR_POWER_PMC1;
 
     switch(sprn) {
         case SPR_POWER_PMC1:
@@ -71,23 +77,26 @@ static void update_PMC_reg(CPUPPCState *env, int sprn)
             break;
 
         case SPR_POWER_PMC5:
-            insns = insns_get_count(env) - env->pmc5_base_icount;
+            insns = curr_icount - env->pmc_base_icount[pmc_idx];
             env->spr[sprn] += insns;
-            env->pmc5_base_icount += insns;
             break;
         case SPR_POWER_PMC6:
-            insns = insns_get_count(env) - env->pmc6_base_icount;
+            insns = curr_icount - env->pmc_base_icount[pmc_idx];
             env->spr[sprn] += cycles_get_count(insns);
-            env->pmc6_base_icount += insns;
             break;
         default:
             break;
     }
+
+    env->pmc_base_icount[pmc_idx] = curr_icount;
 }
 
 static void update_PMC_base_icount(CPUPPCState *env, int sprn)
 {
     uint64_t curr_icount;
+    int pmc_idx;
+
+    g_assert(sprn >= SPR_POWER_PMC1 && sprn < (SPR_POWER_PMC6 + 1));
 
     /*
      * The base_icounts will be updated when the PMU starts
@@ -98,23 +107,8 @@ static void update_PMC_base_icount(CPUPPCState *env, int sprn)
     }
 
     curr_icount = insns_get_count(env);
-
-    switch(sprn) {
-        case SPR_POWER_PMC1:
-        case SPR_POWER_PMC2:
-        case SPR_POWER_PMC3:
-        case SPR_POWER_PMC4:
-            break;
-
-        case SPR_POWER_PMC5:
-            env->pmc5_base_icount = curr_icount;
-            break;
-        case SPR_POWER_PMC6:
-            env->pmc6_base_icount = curr_icount;
-            break;
-        default:
-            break;
-    }
+    pmc_idx = sprn - SPR_POWER_PMC1;
+    env->pmc_base_icount[pmc_idx] = curr_icount;
 }
 
 void helper_store_PMC_value(CPUPPCState *env, uint32_t sprn,
@@ -134,6 +128,7 @@ void helper_store_mmcr0(CPUPPCState *env, target_ulong value)
 {
     bool curr_FC = env->spr[SPR_POWER_MMCR0] & MMCR0_FC;
     bool new_FC = value & MMCR0_FC;
+    int i;
 
     /*
      * In an frozen count (FC) bit change:
@@ -154,8 +149,10 @@ void helper_store_mmcr0(CPUPPCState *env, target_ulong value)
             uint64_t curr_icount = insns_get_count(env);
 
             printf("---- setting FC to 0 (PMCs now running) \n");
-            env->pmc5_base_icount = curr_icount;
-            env->pmc6_base_icount = curr_icount;
+
+            for (i = 0; i < 6; i++) {
+                env->pmc_base_icount[i] = curr_icount;
+            }
         }
     }
 
