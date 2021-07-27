@@ -34,6 +34,26 @@ static uint64_t cycles_get_count(uint64_t insns)
     return insns * 4;
 }
 
+static void update_PMC_PM_INST_CMPL(CPUPPCState *env, int sprn,
+                                    uint64_t curr_icount)
+{
+    int pmc_idx;
+
+    pmc_idx = sprn - SPR_POWER_PMC1;
+    env->spr[sprn] += curr_icount - env->pmc_base_icount[pmc_idx];
+}
+
+static void update_PMC_PM_CYC(CPUPPCState *env, int sprn,
+                              uint64_t curr_icount)
+{
+    uint64_t insns;
+    int pmc_idx;
+
+    pmc_idx = sprn - SPR_POWER_PMC1;
+    insns = curr_icount - env->pmc_base_icount[pmc_idx];
+    env->spr[sprn] += cycles_get_count(insns);
+}
+
 /*
  * Set all PMCs values after a PMU freeze via MMCR0_FC.
  *
@@ -44,9 +64,8 @@ static void update_PMCs_on_freeze(CPUPPCState *env)
 {
     uint64_t curr_icount = insns_get_count(env);
 
-    env->spr[SPR_POWER_PMC5] += curr_icount - env->pmc_base_icount[4];
-    env->spr[SPR_POWER_PMC6] += cycles_get_count(curr_icount -
-                                                 env->pmc_base_icount[5]);
+    update_PMC_PM_INST_CMPL(env, SPR_POWER_PMC5, curr_icount);
+    update_PMC_PM_CYC(env, SPR_POWER_PMC6, curr_icount);
 }
 
 /*
@@ -57,7 +76,7 @@ static void update_PMCs_on_freeze(CPUPPCState *env)
  */
 static void update_PMC_reg(CPUPPCState *env, int sprn)
 {
-    uint64_t insns, curr_icount;
+    uint64_t curr_icount;
     int pmc_idx;
 
     if (pmu_global_freeze(env)) {
@@ -77,12 +96,10 @@ static void update_PMC_reg(CPUPPCState *env, int sprn)
             break;
 
         case SPR_POWER_PMC5:
-            insns = curr_icount - env->pmc_base_icount[pmc_idx];
-            env->spr[sprn] += insns;
+            update_PMC_PM_INST_CMPL(env, SPR_POWER_PMC5, curr_icount);
             break;
         case SPR_POWER_PMC6:
-            insns = curr_icount - env->pmc_base_icount[pmc_idx];
-            env->spr[sprn] += cycles_get_count(insns);
+            update_PMC_PM_CYC(env, SPR_POWER_PMC6, curr_icount);
             break;
         default:
             break;
