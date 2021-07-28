@@ -432,19 +432,19 @@ void spr_write_generic(DisasContext *ctx, int sprn, int gprn)
 
 void spr_write_pmu_generic(DisasContext *ctx, int sprn, int gprn)
 {
-    TCGv_i32 t_sprn, t_insns;
+    // TCGv_i32 t_sprn, t_insns;
 
-    gen_icount_io_start(ctx);
-
+    // gen_icount_io_start(ctx);
     switch (sprn) {
         case SPR_POWER_MMCR0:
-            t_insns = tcg_const_i32(ctx->base.num_insns);
+       //     t_insns = tcg_const_i32(ctx->base.num_insns);
             spr_write_generic(ctx, sprn, gprn);
             // gen_helper_store_mmcr0(cpu_env, cpu_gpr[gprn], t_insns);
-            tcg_temp_free_i32(t_insns);
+        //     tcg_temp_free_i32(t_insns);
 
             /* Must stop the translation as PMC state (may have) changed */
-            ctx->base.is_jmp = DISAS_TOO_MANY;
+            // ctx->base.is_jmp = DISAS_TOO_MANY;
+            ctx->base.is_jmp = DISAS_EXIT_UPDATE;
             break;
         case SPR_POWER_PMC1:
         case SPR_POWER_PMC2:
@@ -452,10 +452,14 @@ void spr_write_pmu_generic(DisasContext *ctx, int sprn, int gprn)
         case SPR_POWER_PMC4:
         case SPR_POWER_PMC5:
         case SPR_POWER_PMC6:
+            spr_write_generic(ctx, sprn, gprn);
+            break;
+            /*
             t_sprn = tcg_const_i32(sprn);
             gen_helper_store_PMC_value(cpu_env, t_sprn, cpu_gpr[gprn]);
             tcg_temp_free_i32(t_sprn);
             break;
+            */
         default:
             spr_write_generic(ctx, sprn, gprn);
     }
@@ -635,11 +639,11 @@ void spr_write_ureg(DisasContext *ctx, int sprn, int gprn)
 void spr_write_pmu_ureg(DisasContext *ctx, int sprn, int gprn)
 {
     TCGv t0, t1;
-    TCGv_i32 t_sprn, t_insns;
+    // TCGv_i32 t_sprn, t_insns;
 
     int effective_sprn = sprn + 0x10;
 
-    gen_icount_io_start(ctx);
+    // gen_icount_io_start(ctx);
     /* TODO: add this back when we're solid with the rest of the logic */
 #if 0
     if (((ctx->spr[SPR_POWER_MMCR0] & MMCR0_PMCC) >> 18) == 0) {
@@ -665,17 +669,17 @@ void spr_write_pmu_ureg(DisasContext *ctx, int sprn, int gprn)
             tcg_gen_andi_tl(t1, t1, ~(MMCR0_FC | MMCR0_PMAO | MMCR0_PMAE));
             tcg_gen_or_tl(t1, t1, t0); // Keep all other bits intact
 
-            t_insns = tcg_const_i32(ctx->base.num_insns);
+            // t_insns = tcg_const_i32(ctx->base.num_insns);
 
             // gen_helper_store_mmcr0(cpu_env, t1, t_insns);
             gen_store_spr(effective_sprn, t1);
 
             /* Must stop the translation as PMC state (may have) changed */
-            ctx->base.is_jmp = DISAS_TOO_MANY;
+            ctx->base.is_jmp = DISAS_EXIT_UPDATE;
 
             tcg_temp_free(t0);
             tcg_temp_free(t1);
-            tcg_temp_free_i32(t_insns);
+            // tcg_temp_free_i32(t_insns);
             break;
         case SPR_POWER_PMC1:
         case SPR_POWER_PMC2:
@@ -683,9 +687,10 @@ void spr_write_pmu_ureg(DisasContext *ctx, int sprn, int gprn)
         case SPR_POWER_PMC4:
         case SPR_POWER_PMC5:
         case SPR_POWER_PMC6:
-            t_sprn = tcg_const_i32(effective_sprn);
-            gen_helper_store_PMC_value(cpu_env, t_sprn, cpu_gpr[gprn]);
-            tcg_temp_free_i32(t_sprn);
+            gen_store_spr(effective_sprn, cpu_gpr[gprn]);
+            // t_sprn = tcg_const_i32(effective_sprn);
+            // gen_helper_store_PMC_value(cpu_env, t_sprn, cpu_gpr[gprn]);
+            // tcg_temp_free_i32(t_sprn);
             break;
         default:
             gen_store_spr(effective_sprn, cpu_gpr[gprn]);
@@ -8817,6 +8822,8 @@ static void ppc_tr_tb_stop(DisasContextBase *dcbase, CPUState *cs)
         /* We have already exited the TB. */
         return;
     }
+
+    gen_helper_store_insns_completed(cpu_env, tcg_constant_i32(dcbase->num_insns));
 
     /* Honor single stepping. */
     sse = ctx->singlestep_enabled & (CPU_SINGLE_STEP | GDBSTUB_SINGLE_STEP);

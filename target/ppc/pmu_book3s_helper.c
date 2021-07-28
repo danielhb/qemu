@@ -24,7 +24,7 @@ static bool pmu_global_freeze(CPUPPCState *env)
 
 static uint64_t insns_get_count(CPUPPCState *env)
 {
-    return (uint64_t)icount_get_raw();
+    return env->spr[SPR_POWER_PMC5];
 }
 
 static uint64_t cycles_get_count(uint64_t insns)
@@ -108,11 +108,13 @@ static void update_PMCs_on_freeze(CPUPPCState *env, uint32_t insns)
     }
 
     // update_PMC_PM_INST_CMPL(env, SPR_POWER_PMC5, curr_icount);
+
+#if 0
     printf("--- SPR_POWER_PMC5 = %lx , base_icount = %lx, insns = %x",
             env->spr[SPR_POWER_PMC5], env->pmc_base_icount[4], insns );
     env->spr[SPR_POWER_PMC5] += env->pmc_base_icount[4] + insns;
     env->pmc_base_icount[4] = 0;
-
+#endif
 
     update_PMC_PM_CYC(env, SPR_POWER_PMC6, curr_icount);
 }
@@ -161,6 +163,7 @@ static void update_PMC_reg(CPUPPCState *env, int sprn)
     env->pmc_base_icount[pmc_idx] = curr_icount;
 }
 
+#if 0
 static void update_PMC_base_icount(CPUPPCState *env, int sprn)
 {
     uint64_t curr_icount;
@@ -189,6 +192,7 @@ void helper_store_PMC_value(CPUPPCState *env, uint32_t sprn,
     env->spr[sprn] = value;
     update_PMC_base_icount(env, sprn);
 }
+#endif
 
 uint64_t helper_get_PMC_value(CPUPPCState *env, uint32_t sprn)
 {
@@ -234,9 +238,7 @@ void helper_store_mmcr0(CPUPPCState *env, target_ulong value, uint32_t insns)
 
 void helper_store_insns_completed(CPUPPCState *env, uint32_t insns)
 {
-    if (pmu_global_freeze(env)) {
-        return;
+    if (!pmu_global_freeze(env)) {
+        env->spr[SPR_POWER_PMC5] += insns;
     }
-
-    env->spr[SPR_POWER_PMC5] += insns;
 }

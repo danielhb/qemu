@@ -24,7 +24,7 @@ DEF_HELPER_2(store_pcr, void, env, tl)
 DEF_HELPER_3(store_mmcr0, void, env, tl, i32)
 //DEF_HELPER_1(store_insns_completed, void, env)
 DEF_HELPER_2(store_insns_completed, void, env, i32)
-DEF_HELPER_3(store_PMC_value, void, env, i32, tl)
+// DEF_HELPER_3(store_PMC_value, void, env, i32, tl)
 DEF_HELPER_2(get_PMC_value, tl, env, i32)
 #endif
 DEF_HELPER_1(check_tlb_flush_local, void, env)
