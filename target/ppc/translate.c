@@ -432,16 +432,19 @@ void spr_write_generic(DisasContext *ctx, int sprn, int gprn)
 
 void spr_write_pmu_generic(DisasContext *ctx, int sprn, int gprn)
 {
-    TCGv_i32 t_sprn;
+    TCGv_i32 t_sprn, t_insns;
 
     gen_icount_io_start(ctx);
 
     switch (sprn) {
         case SPR_POWER_MMCR0:
-            gen_helper_store_mmcr0(cpu_env, cpu_gpr[gprn]);
+            t_insns = tcg_const_i32(ctx->base.num_insns);
+            spr_write_generic(ctx, sprn, gprn);
+            // gen_helper_store_mmcr0(cpu_env, cpu_gpr[gprn], t_insns);
+            tcg_temp_free_i32(t_insns);
 
             /* Must stop the translation as PMC state (may have) changed */
-            ctx->base.is_jmp = DISAS_EXIT_UPDATE;
+            ctx->base.is_jmp = DISAS_TOO_MANY;
             break;
         case SPR_POWER_PMC1:
         case SPR_POWER_PMC2:
@@ -632,7 +635,7 @@ void spr_write_ureg(DisasContext *ctx, int sprn, int gprn)
 void spr_write_pmu_ureg(DisasContext *ctx, int sprn, int gprn)
 {
     TCGv t0, t1;
-    TCGv_i32 t_sprn;
+    TCGv_i32 t_sprn, t_insns;
 
     int effective_sprn = sprn + 0x10;
 
@@ -662,12 +665,17 @@ void spr_write_pmu_ureg(DisasContext *ctx, int sprn, int gprn)
             tcg_gen_andi_tl(t1, t1, ~(MMCR0_FC | MMCR0_PMAO | MMCR0_PMAE));
             tcg_gen_or_tl(t1, t1, t0); // Keep all other bits intact
 
-            gen_helper_store_mmcr0(cpu_env, t1);
+            t_insns = tcg_const_i32(ctx->base.num_insns);
+
+            // gen_helper_store_mmcr0(cpu_env, t1, t_insns);
+            gen_store_spr(effective_sprn, t1);
+
             /* Must stop the translation as PMC state (may have) changed */
-            ctx->base.is_jmp = DISAS_EXIT_UPDATE;
+            ctx->base.is_jmp = DISAS_TOO_MANY;
 
             tcg_temp_free(t0);
             tcg_temp_free(t1);
+            tcg_temp_free_i32(t_insns);
             break;
         case SPR_POWER_PMC1:
         case SPR_POWER_PMC2:
@@ -8724,6 +8732,9 @@ static void ppc_tr_tb_start(DisasContextBase *db, CPUState *cs)
 
 static void ppc_tr_insn_start(DisasContextBase *dcbase, CPUState *cs)
 {
+    // this prints some stuff
+    // gen_helper_store_insns_completed(cpu_env);
+    // gen_helper_store_insns_completed(cpu_env, tcg_constant_i32(1));
     tcg_gen_insn_start(dcbase->pc_next);
 }
 

@@ -22,7 +22,6 @@ static bool pmu_global_freeze(CPUPPCState *env)
     return env->spr[SPR_POWER_MMCR0] & MMCR0_FC;
 }
 
-/* taken from target/arm/helper.c */
 static uint64_t insns_get_count(CPUPPCState *env)
 {
     return (uint64_t)icount_get_raw();
@@ -99,7 +98,7 @@ static void update_programmable_PMC_reg(CPUPPCState *env, int sprn,
  * There is no need to update the base icount of each PMC since
  * the PMU is not running.
  */
-static void update_PMCs_on_freeze(CPUPPCState *env)
+static void update_PMCs_on_freeze(CPUPPCState *env, uint32_t insns)
 {
     uint64_t curr_icount = insns_get_count(env);
     int sprn;
@@ -108,7 +107,13 @@ static void update_PMCs_on_freeze(CPUPPCState *env)
         update_programmable_PMC_reg(env, sprn, curr_icount);
     }
 
-    update_PMC_PM_INST_CMPL(env, SPR_POWER_PMC5, curr_icount);
+    // update_PMC_PM_INST_CMPL(env, SPR_POWER_PMC5, curr_icount);
+    printf("--- SPR_POWER_PMC5 = %lx , base_icount = %lx, insns = %x",
+            env->spr[SPR_POWER_PMC5], env->pmc_base_icount[4], insns );
+    env->spr[SPR_POWER_PMC5] += env->pmc_base_icount[4] + insns;
+    env->pmc_base_icount[4] = 0;
+
+
     update_PMC_PM_CYC(env, SPR_POWER_PMC6, curr_icount);
 }
 
@@ -141,8 +146,11 @@ static void update_PMC_reg(CPUPPCState *env, int sprn)
             break;
 
         case SPR_POWER_PMC5:
-            update_PMC_PM_INST_CMPL(env, SPR_POWER_PMC5, curr_icount);
-            break;
+            //env->spr[sprn] += env->pmc_base_icount[pmc_idx];
+            // env->pmc_base_icount[pmc_idx] = 0;
+            return;
+            // update_PMC_PM_INST_CMPL(env, SPR_POWER_PMC5, curr_icount);
+            // break;
         case SPR_POWER_PMC6:
             update_PMC_PM_CYC(env, SPR_POWER_PMC6, curr_icount);
             break;
@@ -171,6 +179,8 @@ static void update_PMC_base_icount(CPUPPCState *env, int sprn)
     curr_icount = insns_get_count(env);
     pmc_idx = sprn - SPR_POWER_PMC1;
     env->pmc_base_icount[pmc_idx] = curr_icount;
+    if (pmc_idx == 4)
+        env->pmc_base_icount[pmc_idx] = 0;
 }
 
 void helper_store_PMC_value(CPUPPCState *env, uint32_t sprn,
@@ -186,7 +196,7 @@ uint64_t helper_get_PMC_value(CPUPPCState *env, uint32_t sprn)
     return env->spr[sprn];
 }
 
-void helper_store_mmcr0(CPUPPCState *env, target_ulong value)
+void helper_store_mmcr0(CPUPPCState *env, target_ulong value, uint32_t insns)
 {
     bool curr_FC = env->spr[SPR_POWER_MMCR0] & MMCR0_FC;
     bool new_FC = value & MMCR0_FC;
@@ -206,7 +216,7 @@ void helper_store_mmcr0(CPUPPCState *env, target_ulong value)
     if (curr_FC != new_FC) {
         if (!curr_FC) {
             printf("---- setting FC to 1 (froze PMCs) \n");
-            update_PMCs_on_freeze(env);
+            update_PMCs_on_freeze(env, insns);
         } else {
             uint64_t curr_icount = insns_get_count(env);
 
@@ -215,8 +225,18 @@ void helper_store_mmcr0(CPUPPCState *env, target_ulong value)
             for (i = 0; i < 6; i++) {
                 env->pmc_base_icount[i] = curr_icount;
             }
+            env->pmc_base_icount[4] = 0;
         }
     }
 
     env->spr[SPR_POWER_MMCR0] = value;
+}
+
+void helper_store_insns_completed(CPUPPCState *env, uint32_t insns)
+{
+    if (pmu_global_freeze(env)) {
+        return;
+    }
+
+    env->spr[SPR_POWER_PMC5] += insns;
 }
