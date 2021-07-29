@@ -1184,12 +1184,8 @@ struct CPUPPCState {
     uint64_t tm_dscr;
     uint64_t tm_tar;
 
-    /*
-     * PMU registers icount state array. index = 0 contains the
-     * current PMC1 base icount, index = 1 contains the current
-     * PMC2 base icount and so on.
-     */
-    uint64_t pmc_base_icount[6];
+    uint64_t PMU_curr_insns;
+    bool PMU_running;
 };
 
 #define SET_FIT_PERIOD(a_, b_, c_, d_)          \

@@ -17,14 +17,9 @@
 #include "qemu/error-report.h"
 #include "qemu/main-loop.h"
 
-static bool pmu_global_freeze(CPUPPCState *env)
+static bool pmu_is_running(CPUPPCState *env)
 {
-    return env->spr[SPR_POWER_MMCR0] & MMCR0_FC;
-}
-
-static uint64_t insns_get_count(CPUPPCState *env)
-{
-    return env->spr[SPR_POWER_PMC5];
+    return !(env->spr[SPR_POWER_MMCR0] & MMCR0_FC);
 }
 
 static uint64_t cycles_get_count(uint64_t insns)
@@ -33,28 +28,17 @@ static uint64_t cycles_get_count(uint64_t insns)
     return insns * 4;
 }
 
-static void update_PMC_PM_INST_CMPL(CPUPPCState *env, int sprn,
-                                    uint64_t curr_icount)
+static void update_PMC_PM_INST_CMPL(CPUPPCState *env, int sprn, uint32_t insns)
 {
-    int pmc_idx;
-
-    pmc_idx = sprn - SPR_POWER_PMC1;
-    env->spr[sprn] += curr_icount - env->pmc_base_icount[pmc_idx];
+    env->spr[sprn] += insns;
 }
 
-static void update_PMC_PM_CYC(CPUPPCState *env, int sprn,
-                              uint64_t curr_icount)
+static void update_PMC_PM_CYC(CPUPPCState *env, int sprn, uint32_t insns)
 {
-    uint64_t insns;
-    int pmc_idx;
-
-    pmc_idx = sprn - SPR_POWER_PMC1;
-    insns = curr_icount - env->pmc_base_icount[pmc_idx];
     env->spr[sprn] += cycles_get_count(insns);
 }
 
-static void update_programmable_PMC_reg(CPUPPCState *env, int sprn,
-                                        uint64_t curr_icount)
+static void update_programmable_PMC_reg(CPUPPCState *env, int sprn, uint32_t insns)
 {
     int event;
 
@@ -78,14 +62,12 @@ static void update_programmable_PMC_reg(CPUPPCState *env, int sprn,
             return;
     }
 
-    // printf("---- mmcr1 = %lx , event = %x \n", env->spr[SPR_POWER_MMCR1], event);
-
     switch (event) {
         case 0x2:
-            update_PMC_PM_INST_CMPL(env, sprn, curr_icount);
+            update_PMC_PM_INST_CMPL(env, sprn, insns);
             break;
         case 0x1E:
-            update_PMC_PM_CYC(env, sprn, curr_icount);
+            update_PMC_PM_CYC(env, sprn, insns);
             break;
         default:
             return;
@@ -98,113 +80,41 @@ static void update_programmable_PMC_reg(CPUPPCState *env, int sprn,
  * There is no need to update the base icount of each PMC since
  * the PMU is not running.
  */
-static void update_PMCs_on_freeze(CPUPPCState *env, uint32_t insns)
+static void update_PMCs(CPUPPCState *env, uint32_t insns)
 {
-    uint64_t curr_icount = insns_get_count(env);
     int sprn;
 
     for (sprn = SPR_POWER_PMC1; sprn < SPR_POWER_PMC5; sprn++) {
-        update_programmable_PMC_reg(env, sprn, curr_icount);
+        update_programmable_PMC_reg(env, sprn, insns);
     }
 
-    // update_PMC_PM_INST_CMPL(env, SPR_POWER_PMC5, curr_icount);
-
-#if 0
-    printf("--- SPR_POWER_PMC5 = %lx , base_icount = %lx, insns = %x",
-            env->spr[SPR_POWER_PMC5], env->pmc_base_icount[4], insns );
-    env->spr[SPR_POWER_PMC5] += env->pmc_base_icount[4] + insns;
-    env->pmc_base_icount[4] = 0;
-#endif
-
-    update_PMC_PM_CYC(env, SPR_POWER_PMC6, curr_icount);
+    update_PMC_PM_INST_CMPL(env, SPR_POWER_PMC5, insns);
+    update_PMC_PM_CYC(env, SPR_POWER_PMC6, insns);
 }
 
-/*
- * Update a PMC register value (specified by sprn) based on its
- * current set event.
- *
- * This is a no-op if the PMU is frozen (MMCR0_FC set).
- */
-static void update_PMC_reg(CPUPPCState *env, int sprn)
+
+void helper_store_mmcr0(CPUPPCState *env, target_ulong value) //, uint64_t orig_icount)
 {
-    uint64_t curr_icount;
-    int pmc_idx;
+    uint64_t curr_time = (uint64_t)icount_get_raw();
 
-    if (pmu_global_freeze(env)) {
-        return;
-    }
-
-    g_assert(sprn >= SPR_POWER_PMC1 && sprn < (SPR_POWER_PMC6 + 1));
-
-    curr_icount = insns_get_count(env);
-    pmc_idx = sprn - SPR_POWER_PMC1;
-
-    switch(sprn) {
-        case SPR_POWER_PMC1:
-        case SPR_POWER_PMC2:
-        case SPR_POWER_PMC3:
-        case SPR_POWER_PMC4:
-            update_programmable_PMC_reg(env, sprn, curr_icount);
-            break;
-
-        case SPR_POWER_PMC5:
-            //env->spr[sprn] += env->pmc_base_icount[pmc_idx];
-            // env->pmc_base_icount[pmc_idx] = 0;
-            return;
-            // update_PMC_PM_INST_CMPL(env, SPR_POWER_PMC5, curr_icount);
-            // break;
-        case SPR_POWER_PMC6:
-            update_PMC_PM_CYC(env, SPR_POWER_PMC6, curr_icount);
-            break;
-        default:
-            break;
-    }
-
-    env->pmc_base_icount[pmc_idx] = curr_icount;
-}
-
-#if 0
-static void update_PMC_base_icount(CPUPPCState *env, int sprn)
-{
-    uint64_t curr_icount;
-    int pmc_idx;
-
-    g_assert(sprn >= SPR_POWER_PMC1 && sprn < (SPR_POWER_PMC6 + 1));
-
-    /*
-     * The base_icounts will be updated when the PMU starts
-     * spinning again.
-     */
-    if (pmu_global_freeze(env)) {
-        return;
-    }
-
-    curr_icount = insns_get_count(env);
-    pmc_idx = sprn - SPR_POWER_PMC1;
-    env->pmc_base_icount[pmc_idx] = curr_icount;
-    if (pmc_idx == 4)
-        env->pmc_base_icount[pmc_idx] = 0;
-}
-
-void helper_store_PMC_value(CPUPPCState *env, uint32_t sprn,
-                            target_ulong value)
-{
-    env->spr[sprn] = value;
-    update_PMC_base_icount(env, sprn);
-}
-#endif
-
-uint64_t helper_get_PMC_value(CPUPPCState *env, uint32_t sprn)
-{
-    update_PMC_reg(env, sprn);
-    return env->spr[sprn];
-}
-
-void helper_store_mmcr0(CPUPPCState *env, target_ulong value, uint32_t insns)
-{
     bool curr_FC = env->spr[SPR_POWER_MMCR0] & MMCR0_FC;
     bool new_FC = value & MMCR0_FC;
-    int i;
+
+#if 0
+--------- need to handle this later --------------
+
+            /*
+             * Filter out all bits but FC, PMAO, and PMAE, according
+             * to ISA v3.1, in 10.4.4 Monitor Mode Control Register 0,
+             * fourth paragraph.
+             */
+            tcg_gen_andi_tl(t0, cpu_gpr[gprn],
+                            MMCR0_FC | MMCR0_PMAO | MMCR0_PMAE);
+            gen_load_spr(t1, SPR_POWER_MMCR0);
+            tcg_gen_andi_tl(t1, t1, ~(MMCR0_FC | MMCR0_PMAO | MMCR0_PMAE));
+            tcg_gen_or_tl(t1, t1, t0); // Keep all other bits intact
+
+#endif
 
     /*
      * In an frozen count (FC) bit change:
@@ -219,17 +129,14 @@ void helper_store_mmcr0(CPUPPCState *env, target_ulong value, uint32_t insns)
      */
     if (curr_FC != new_FC) {
         if (!curr_FC) {
-            printf("---- setting FC to 1 (froze PMCs) \n");
-            update_PMCs_on_freeze(env, insns);
+            uint64_t insns = (curr_time - env->PMU_curr_insns);
+
+            // exclude both mtsprs() that opened and closed the timer
+            insns -= 2;
+            // update the counter with the instructions run until the freeze
+            update_PMCs(env, insns);
         } else {
-            uint64_t curr_icount = insns_get_count(env);
-
-            printf("---- setting FC to 0 (PMCs now running) \n");
-
-            for (i = 0; i < 6; i++) {
-                env->pmc_base_icount[i] = curr_icount;
-            }
-            env->pmc_base_icount[4] = 0;
+            env->PMU_curr_insns = curr_time;
         }
     }
 
@@ -238,7 +145,13 @@ void helper_store_mmcr0(CPUPPCState *env, target_ulong value, uint32_t insns)
 
 void helper_store_insns_completed(CPUPPCState *env, uint32_t insns)
 {
-    if (!pmu_global_freeze(env)) {
-        env->spr[SPR_POWER_PMC5] += insns;
+    if (pmu_is_running(env)) {
+        update_PMCs(env, insns);
     }
+}
+
+uint64_t helper_get_current_icount(CPUPPCState *env)
+{
+    return cpu_ppc_load_tbu(env);
+    // return (uint64_t)icount_get_raw();
 }
