@@ -137,24 +137,36 @@ static void cpu_ppc_pmu_set_timer(CPUPPCState *env, uint64_t time_ns)
 }
 #endif
 
-static int64_t get_insns_for_cn(CPUPPCState *env, uint64_t val)
+static int64_t get_val_for_cn(CPUPPCState *env, uint64_t val)
 {
     return 0x80000000 - val;
 }
 
 static void set_PMU_excp_timer(CPUPPCState *env)
 {
-    if (env->spr[SPR_POWER_MMCR0] & MMCR0_PMC1CE) {
-        if (get_PMC_event(env, SPR_POWER_PMC1) == 0x2) {
-            uint64_t insns_limit, timeout, now;
+    uint64_t timeout, now, limit;
 
-            insns_limit = get_insns_for_cn(env, env->spr[SPR_POWER_PMC1]);
-            timeout = icount_to_ns(insns_limit);
-            now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
-
-            timer_mod(env->pmu_intr_timer, now + timeout);
-        }
+    if (!(env->spr[SPR_POWER_MMCR0] & MMCR0_PMC1CE)) {
+        return;
     }
+
+    limit = get_val_for_cn(env, env->spr[SPR_POWER_PMC1]);
+
+    switch (get_PMC_event(env, SPR_POWER_PMC1)) {
+    case 0x2:
+        timeout = icount_to_ns(limit);
+        break;
+    case 0x1e:
+        timeout = muldiv64(limit, NANOSECONDS_PER_SECOND,
+                           PPC_CPU_FREQ);
+        break;
+    default:
+        return;
+    }
+
+    now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+
+    timer_mod(env->pmu_intr_timer, now + timeout);
 
 }
 
@@ -208,15 +220,25 @@ static void cpu_ppc_pmu_timer_cb(void *opaque)
     PowerPCCPU *cpu = opaque;
     CPUPPCState *env = &cpu->env;
     uint64_t curr_insns = (uint64_t)icount_get_raw() - env->pmu_base_icount;
-    uint64_t mmcr0, curr_val;
+    uint64_t mmcr0, curr_val = 0;
     int64_t remaining_val;
 
     /*
      * Get current PMC1 val, see if we're early for the counter
      * negative condition.
      */
-    curr_val = curr_insns + env->spr[SPR_POWER_PMC1];
-    remaining_val = get_insns_for_cn(env, curr_val);
+    switch (get_PMC_event(env, SPR_POWER_PMC1)) {
+    case 0x2:
+        curr_val = curr_insns + env->spr[SPR_POWER_PMC1];
+        break;
+    case 0x1e:
+        curr_val = get_cycles(curr_insns) + env->spr[SPR_POWER_PMC1];
+        break;
+    default:
+        return;
+    }
+
+    remaining_val = get_val_for_cn(env, curr_val);
 
     if (remaining_val > 0 ) {
         uint64_t timeout, now;

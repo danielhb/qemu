@@ -832,7 +832,11 @@ static inline void powerpc_excp(PowerPCCPU *cpu, int excp_model, int excp)
             nip = env->spr[SPR_EBBHR];          // EBB handler
             powerpc_set_excp_state(cpu, nip, env->msr);
         }
-        break;
+        /*
+         * This interrupt is handled by userspace. No need
+         * to proceed.
+         */
+        return;
     default:
     excp_invalid:
         cpu_abort(cs, "Invalid PowerPC exception %d. Aborting\n", excp);
