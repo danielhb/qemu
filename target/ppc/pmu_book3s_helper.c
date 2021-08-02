@@ -32,6 +32,39 @@ static uint64_t get_cycles(uint64_t insns)
                     NANOSECONDS_PER_SECOND);
 }
 
+static uint8_t get_PMC_event(CPUPPCState *env, int sprn)
+{
+    int event= 0x0;
+
+    switch(sprn) {
+        case SPR_POWER_PMC1:
+            event = MMCR1_PMC1SEL & env->spr[SPR_POWER_MMCR1];
+            event = event >> MMCR1_PMC1SEL_SHIFT;
+            break;
+        case SPR_POWER_PMC2:
+            event = MMCR1_PMC2SEL & env->spr[SPR_POWER_MMCR1];
+            event = event >> MMCR1_PMC2SEL_SHIFT;
+            break;
+        case SPR_POWER_PMC3:
+            event = MMCR1_PMC3SEL & env->spr[SPR_POWER_MMCR1];
+            event = event >> MMCR1_PMC3SEL_SHIFT;
+            break;
+        case SPR_POWER_PMC4:
+            event = MMCR1_PMC4SEL & env->spr[SPR_POWER_MMCR1];
+            break;
+        case SPR_POWER_PMC5:
+            event = 0x2;
+            break;
+        case SPR_POWER_PMC6:
+            event = 0x1E;
+            break;
+        default:
+            break;
+    }
+
+    return event;
+}
+
 static void update_PMC_PM_INST_CMPL(CPUPPCState *env, int sprn, uint32_t insns)
 {
     env->spr[sprn] += insns;
@@ -66,7 +99,7 @@ static void update_programmable_PMC_reg(CPUPPCState *env, int sprn, uint32_t ins
             return;
     }
 
-    switch (event) {
+    switch (get_PMC_event(env, sprn)) {
         case 0x2:
             update_PMC_PM_INST_CMPL(env, sprn, insns);
             break;
@@ -96,11 +129,42 @@ static void update_PMCs(CPUPPCState *env, uint32_t insns)
     update_PMC_PM_CYC(env, SPR_POWER_PMC6, insns);
 }
 
+#if 0
+static void cpu_ppc_pmu_set_timer(CPUPPCState *env, uint64_t time_ns)
+{
+    int64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+    timer_mod(env->pmu_intr_timer, now + time_ns);
+}
+#endif
+
+static int64_t get_insns_for_cn(CPUPPCState *env, uint64_t val)
+{
+    return 0x80000000 - val;
+}
+
+static void set_PMU_excp_timer(CPUPPCState *env)
+{
+    if (env->spr[SPR_POWER_MMCR0] & MMCR0_PMC1CE) {
+        if (get_PMC_event(env, SPR_POWER_PMC1) == 0x2) {
+            uint64_t insns_limit, timeout, now;
+
+            insns_limit = get_insns_for_cn(env, env->spr[SPR_POWER_PMC1]);
+            timeout = icount_to_ns(insns_limit);
+            now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+
+            timer_mod(env->pmu_intr_timer, now + timeout);
+        }
+    }
+
+}
+
 void helper_store_mmcr0(CPUPPCState *env, target_ulong value)
 {
     uint64_t curr_icount = (uint64_t)icount_get_raw();
     bool curr_FC = env->spr[SPR_POWER_MMCR0] & MMCR0_FC;
     bool new_FC = value & MMCR0_FC;
+
+    env->spr[SPR_POWER_MMCR0] = value;
 
     /*
      * In an frozen count (FC) bit change:
@@ -122,47 +186,61 @@ void helper_store_mmcr0(CPUPPCState *env, target_ulong value)
 
             /* update the counter with the instructions run until the freeze */
             update_PMCs(env, insns);
+
+            /* delete pending timer */
+            timer_del(env->pmu_intr_timer);
         } else {
             env->pmu_base_icount = curr_icount;
+
+            /*
+             * Start performance monitor alert timer for counter negative
+             * events, if needed.
+             */
+            if ((value & MMCR0_PMAE) && (value & MMCR0_FCECE)) {
+                set_PMU_excp_timer(env);
+            }
         }
     }
-
-    env->spr[SPR_POWER_MMCR0] = value;
 }
-
-#if 0
-static void cpu_ppc_pmu_timer_set(CPUPPCState *env, uint64_t time_ns)
-{
-    int64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
-    timer_mod(env->pmu_intr_timer, now + time_ns);
-}
-
-static void set_next_PMU_timer(CPUPPCState *env)
-{
-
-}
-#endif
 
 static void cpu_ppc_pmu_timer_cb(void *opaque)
 {
     PowerPCCPU *cpu = opaque;
     CPUPPCState *env = &cpu->env;
-    uint64_t mmcr0;
+    uint64_t curr_insns = (uint64_t)icount_get_raw() - env->pmu_base_icount;
+    uint64_t mmcr0, curr_val;
+    int64_t remaining_val;
 
+    /*
+     * Get current PMC1 val, see if we're early for the counter
+     * negative condition.
+     */
+    curr_val = curr_insns + env->spr[SPR_POWER_PMC1];
+    remaining_val = get_insns_for_cn(env, curr_val);
+
+    if (remaining_val > 0 ) {
+        uint64_t timeout, now;
+        printf("==== cpu_ppc_pmu_timer_cb too early: curr_val = %lu \n",
+               curr_val);
+
+        timeout = icount_to_ns(remaining_val);
+        now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+
+        timer_mod(env->pmu_intr_timer, now + timeout);
+        return;
+    }
+
+    printf("==== cpu_ppc_pmu_timer_cb reached, curr_val = %lu \n", curr_val);
 
     mmcr0 = env->spr[SPR_POWER_MMCR0];
     if (env->spr[SPR_POWER_MMCR0] & MMCR0_EBE) {
-        /* freeeze counters if needed */
-        if (mmcr0 & MMCR0_FCECE) {
-            mmcr0 &= ~MMCR0_FCECE;
-            mmcr0 |= MMCR0_FC;
-        }
+        update_PMCs(env, curr_insns);
 
-        /* Clear PMAE and set PMAO */
-        if (mmcr0 & MMCR0_PMAE) {
-            mmcr0 &= ~MMCR0_PMAE;
-            mmcr0 |= MMCR0_PMAO;
-        }
+        mmcr0 &= ~MMCR0_FCECE;
+        mmcr0 &= ~MMCR0_PMAE;
+        mmcr0 |= MMCR0_PMAO;
+        mmcr0 |= MMCR0_FC;
+
         env->spr[SPR_POWER_MMCR0] = mmcr0;
 
         /* Fire the PMC hardware exception */
