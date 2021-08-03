@@ -299,3 +299,35 @@ void helper_insns_inc(CPUPPCState *env, uint32_t num_insns)
         }
     }
 }
+
+void helper_store_pmc(CPUPPCState *env, uint32_t sprn, uint64_t value)
+{
+    bool pmu_frozen = env->spr[SPR_POWER_MMCR0] & MMCR0_FC;
+    uint64_t curr_time, time_delta;
+
+    if (pmu_frozen) {
+        env->spr[sprn] = value;
+        return;
+    }
+
+    curr_time = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+    time_delta = curr_time - env->pmu_base_time;
+
+    /* Update the counter with the events counted so far */
+    update_PMCs(env, time_delta);
+
+    /* Set the counter to the desirable value after update_PMCs() */
+    env->spr[sprn] = value;
+
+    /*
+     * Delete the current timer and restart a new one with the
+     * updated values.
+     */
+    timer_del(env->pmu_intr_timer);
+
+    env->pmu_base_time = curr_time;
+
+    if (counter_negative_cond_enabled(env->spr[SPR_POWER_MMCR0])) {
+        set_PMU_excp_timer(env);
+    }
+}
