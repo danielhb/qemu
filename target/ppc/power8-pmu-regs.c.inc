@@ -106,9 +106,33 @@ void spr_write_MMCR0_ureg(DisasContext *ctx, int sprn, int gprn)
     tcg_temp_free(t1);
 }
 
+void spr_write_PMC_ureg(DisasContext *ctx, int sprn, int gprn)
+{
+    /*
+     * All PMCs belongs to Group A SPRs and can't be written by
+     * userspace if PMCC = 0b00.
+     */
+    if (ctx->pmcc_clear) {
+        gen_hvpriv_exception(ctx, POWERPC_EXCP_INVAL_SPR);
+        return;
+    }
+
+    spr_write_PMC(ctx, sprn + 0x10, gprn);
+}
+
 void spr_write_MMCR0(DisasContext *ctx, int sprn, int gprn)
 {
     write_MMCR0_common(ctx, cpu_gpr[gprn]);
+}
+
+void spr_write_PMC(DisasContext *ctx, int sprn, int gprn)
+{
+    TCGv_i32 t_sprn = tcg_const_i32(sprn);
+
+    gen_icount_io_start(ctx);
+    gen_helper_store_pmc(cpu_env, t_sprn, cpu_gpr[gprn]);
+
+    tcg_temp_free_i32(t_sprn);
 }
 #else
 void spr_read_MMCR0_ureg(DisasContext *ctx, int gprn, int sprn)
@@ -126,7 +150,17 @@ void spr_write_MMCR0_ureg(DisasContext *ctx, int sprn, int gprn)
     spr_noaccess(ctx, gprn, sprn);
 }
 
+void spr_write_PMC_ureg(DisasContext *ctx, int sprn, int gprn)
+{
+    spr_noaccess(ctx, gprn, sprn);
+}
+
 void spr_write_MMCR0(DisasContext *ctx, int sprn, int gprn)
+{
+    spr_write_generic(ctx, sprn, gprn);
+}
+
+void spr_write_PMC(DisasContext *ctx, int sprn, int gprn)
 {
     spr_write_generic(ctx, sprn, gprn);
 }
