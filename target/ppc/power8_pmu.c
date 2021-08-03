@@ -21,6 +21,8 @@
 #include "qemu/main-loop.h"
 #include "hw/ppc/ppc.h"
 
+#define COUNTER_NEGATIVE_VAL 0x80000000
+
 /*
  * The pseries and pvn clock runs at 1Ghz, meaning that 1 nanosec
  * equals 1 cycle.
@@ -49,6 +51,12 @@ static uint8_t get_PMC_event(CPUPPCState *env, int sprn)
         break;
     case SPR_POWER_PMC4:
         event = MMCR1_PMC4SEL & env->spr[SPR_POWER_MMCR1];
+        break;
+    case SPR_POWER_PMC5:
+        event = 0x2;
+        break;
+    case SPR_POWER_PMC6:
+        event = 0x1E;
         break;
     default:
         break;
@@ -123,30 +131,65 @@ static void update_PMCs(CPUPPCState *env, uint64_t time_delta)
     }
 }
 
+static int64_t get_CYC_timeout(CPUPPCState *env, int sprn)
+{
+    int64_t remaining_cyc;
+
+    if (env->spr[sprn] >= COUNTER_NEGATIVE_VAL) {
+        return 0;
+    }
+
+    remaining_cyc = COUNTER_NEGATIVE_VAL - env->spr[sprn];
+    return remaining_cyc;
+}
+
+static void set_PMU_excp_timer(CPUPPCState *env)
+{
+    uint64_t timeout, now;
+
+    if (!(env->spr[SPR_POWER_MMCR0] & MMCR0_PMC1CE)) {
+        return;
+    }
+
+    switch (get_PMC_event(env, SPR_POWER_PMC1)) {
+    case 0xF0:
+    case 0x1E:
+        timeout = get_CYC_timeout(env, SPR_POWER_PMC1);
+        break;
+    default:
+        return;
+    }
+
+    now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+
+    timer_mod(env->pmu_intr_timer, now + timeout);
+}
+
 static void cpu_ppc_pmu_timer_cb(void *opaque)
 {
     PowerPCCPU *cpu = opaque;
     CPUPPCState *env = &cpu->env;
-    uint64_t mmcr0;
+    uint64_t time_delta = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) -
+                          env->pmu_base_time;
 
-    mmcr0 = env->spr[SPR_POWER_MMCR0];
-    if (env->spr[SPR_POWER_MMCR0] & MMCR0_EBE) {
-        /* freeeze counters if needed */
-        if (mmcr0 & MMCR0_FCECE) {
-            mmcr0 &= ~MMCR0_FCECE;
-            mmcr0 |= MMCR0_FC;
-        }
-
-        /* Clear PMAE and set PMAO */
-        if (mmcr0 & MMCR0_PMAE) {
-            mmcr0 &= ~MMCR0_PMAE;
-            mmcr0 |= MMCR0_PMAO;
-        }
-        env->spr[SPR_POWER_MMCR0] = mmcr0;
-
-        /* Fire the PMC hardware exception */
-        ppc_set_irq(cpu, PPC_INTERRUPT_PMC, 1);
+    if (!(env->spr[SPR_POWER_MMCR0] & MMCR0_EBE)) {
+        return;
     }
+
+    update_PMCs(env, time_delta);
+
+    if (env->spr[SPR_POWER_MMCR0] & MMCR0_FCECE) {
+        env->spr[SPR_POWER_MMCR0] &= ~MMCR0_FCECE;
+        env->spr[SPR_POWER_MMCR0] |= MMCR0_FC;
+    }
+
+    if (env->spr[SPR_POWER_MMCR0] & MMCR0_PMAE) {
+        env->spr[SPR_POWER_MMCR0] &= ~MMCR0_PMAE;
+        env->spr[SPR_POWER_MMCR0] |= MMCR0_PMAO;
+    }
+
+    /* Fire the PMC hardware exception */
+    ppc_set_irq(cpu, PPC_INTERRUPT_PMC, 1);
 }
 
 void cpu_ppc_pmu_timer_init(CPUPPCState *env)
@@ -156,6 +199,11 @@ void cpu_ppc_pmu_timer_init(CPUPPCState *env)
 
     timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, &cpu_ppc_pmu_timer_cb, cpu);
     env->pmu_intr_timer = timer;
+}
+
+static bool counter_negative_cond_enabled(uint64_t mmcr0)
+{
+    return mmcr0 & MMCR0_PMC1CE;
 }
 
 void helper_store_mmcr0(CPUPPCState *env, target_ulong value)
@@ -186,6 +234,14 @@ void helper_store_mmcr0(CPUPPCState *env, target_ulong value)
             update_PMCs(env, time_delta);
         } else {
             env->pmu_base_time = curr_time;
+
+            /*
+             * Start performance monitor alert timer for counter negative
+             * events, if needed.
+             */
+            if (counter_negative_cond_enabled(env->spr[SPR_POWER_MMCR0])) {
+                set_PMU_excp_timer(env);
+            }
         }
     }
 }
