@@ -822,12 +822,16 @@ static inline void powerpc_excp(PowerPCCPU *cpu, int excp_model, int excp)
                   "is not implemented yet !\n");
         break;
     case POWERPC_EXCP_EBB:       /* Event-based branch exception             */
-        if ((env->spr[SPR_BESCR] & BESCR_GE) &&
-            (env->spr[SPR_BESCR] & BESCR_PME)) {
+        if (env->spr[SPR_BESCR] & BESCR_GE) {
             target_ulong nip;
 
+            if ((env->spr[SPR_BESCR] & BESCR_PME) &&
+                (env->spr[SPR_POWER_MMCR0] & MMCR0_PMAO)) {
+                env->spr[SPR_BESCR] &= ~BESCR_PME;
+                env->spr[SPR_BESCR] |= BESCR_PMEO;  // Set PMEO
+            }
+
             env->spr[SPR_BESCR] &= ~BESCR_GE;   // Clear GE
-            env->spr[SPR_BESCR] |= BESCR_PMEO;  // Set PMEO
             env->spr[SPR_EBBRR] = env->nip;     // Save NIP for rfebb insn
             nip = env->spr[SPR_EBBHR];          // EBB handler
             powerpc_set_excp_state(cpu, nip, env->msr);
