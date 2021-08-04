@@ -149,10 +149,15 @@ static void cpu_ppc_pmu_timer_cb(void *opaque)
 
     update_PMCs(env, icount_delta);
 
-    env->spr[SPR_POWER_MMCR0] &= ~MMCR0_FCECE;
-    env->spr[SPR_POWER_MMCR0] &= ~MMCR0_PMAE;
-    env->spr[SPR_POWER_MMCR0] |= MMCR0_PMAO;
-    env->spr[SPR_POWER_MMCR0] |= MMCR0_FC;
+    if (env->spr[SPR_POWER_MMCR0] & MMCR0_FCECE) {
+        env->spr[SPR_POWER_MMCR0] &= ~MMCR0_FCECE;
+        env->spr[SPR_POWER_MMCR0] |= MMCR0_FC;
+    }
+
+    if (env->spr[SPR_POWER_MMCR0] & MMCR0_PMAE) {
+        env->spr[SPR_POWER_MMCR0] &= ~MMCR0_PMAE;
+        env->spr[SPR_POWER_MMCR0] |= MMCR0_PMAO;
+    }
 
     /* Fire the PMC hardware exception */
     ppc_set_irq(cpu, PPC_INTERRUPT_PMC, 1);
@@ -165,6 +170,11 @@ void cpu_ppc_pmu_timer_init(CPUPPCState *env)
 
     timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, &cpu_ppc_pmu_timer_cb, cpu);
     env->pmu_intr_timer = timer;
+}
+
+static bool mmcr0_counter_neg_cond_enabled(uint64_t mmcr0)
+{
+    return mmcr0 & MMCR0_PMC1CE;
 }
 
 void helper_store_mmcr0(CPUPPCState *env, target_ulong value)
@@ -205,7 +215,7 @@ void helper_store_mmcr0(CPUPPCState *env, target_ulong value)
              * Start performance monitor alert timer for counter negative
              * events, if needed.
              */
-            if ((value & MMCR0_PMAE) && (value & MMCR0_FCECE)) {
+            if (mmcr0_counter_neg_cond_enabled(env->spr[SPR_POWER_MMCR0])) {
                 set_PMU_excp_timer(env);
             }
         }
