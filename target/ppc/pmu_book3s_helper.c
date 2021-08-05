@@ -245,8 +245,6 @@ static void set_PMU_excp_timer(CPUPPCState *env)
     for (i = SPR_POWER_PMC1; i <= SPR_POWER_PMC6; i++) {
         int64_t curr_timeout = get_counter_neg_timeout(env, i);
 
-        printf("----- i = %d , curr_timeout = %ld \n", i, curr_timeout);
-
         if (curr_timeout == -1) {
             continue;
         }
@@ -260,8 +258,6 @@ static void set_PMU_excp_timer(CPUPPCState *env)
             timeout = curr_timeout;
         }
     }
-
-    printf("----- timeout = %ld \n", timeout);
 
     /*
      * This can happen if counter negative conditions were enabled
@@ -281,8 +277,6 @@ static void cpu_ppc_pmu_timer_cb(void *opaque)
     PowerPCCPU *cpu = opaque;
     CPUPPCState *env = &cpu->env;
     uint64_t icount_delta = (uint64_t)icount_get_raw() - env->pmu_base_icount;
-
-    printf("==== cpu_ppc_pmu_timer_cb reached ==== \n");
 
     if (!(env->spr[SPR_POWER_MMCR0] & MMCR0_EBE)) {
         return;
