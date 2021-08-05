@@ -112,14 +112,20 @@ static void update_programmable_PMC_reg(CPUPPCState *env, int sprn, uint32_t ins
  */
 static void update_PMCs(CPUPPCState *env, uint32_t insns)
 {
+    bool PMC14_running = !(env->spr[SPR_POWER_MMCR0] & MMCR0_FC14);
+    bool PMC56_running = !(env->spr[SPR_POWER_MMCR0] & MMCR0_FC56);
     int sprn;
 
-    for (sprn = SPR_POWER_PMC1; sprn < SPR_POWER_PMC5; sprn++) {
-        update_programmable_PMC_reg(env, sprn, insns);
+    if (PMC14_running) {
+        for (sprn = SPR_POWER_PMC1; sprn < SPR_POWER_PMC5; sprn++) {
+            update_programmable_PMC_reg(env, sprn, insns);
+        }
     }
 
-    update_PMC_PM_INST_CMPL(env, SPR_POWER_PMC5, insns);
-    update_PMC_PM_CYC(env, SPR_POWER_PMC6, insns);
+    if (PMC56_running) {
+        update_PMC_PM_INST_CMPL(env, SPR_POWER_PMC5, insns);
+        update_PMC_PM_CYC(env, SPR_POWER_PMC6, insns);
+    }
 }
 
 static int64_t get_INST_CMPL_timeout(CPUPPCState *env, int sprn)
