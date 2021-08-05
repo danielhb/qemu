@@ -54,6 +54,15 @@ static uint8_t get_PMC_event(CPUPPCState *env, int sprn)
     return event;
 }
 
+static bool pmc_is_running(CPUPPCState *env, int sprn)
+{
+    if (sprn < SPR_POWER_PMC5) {
+        return !(env->spr[SPR_POWER_MMCR0] & MMCR0_FC14);
+    }
+
+    return !(env->spr[SPR_POWER_MMCR0] & MMCR0_FC56);
+}
+
 static void update_PMC_PM_CYC(CPUPPCState *env, int sprn,
                               uint64_t time_delta)
 {
@@ -96,13 +105,19 @@ static void update_programmable_PMC_reg(CPUPPCState *env, int sprn,
  */
 static void update_PMCs(CPUPPCState *env, uint64_t time_delta)
 {
+    bool PMC14_running = !(env->spr[SPR_POWER_MMCR0] & MMCR0_FC14);
+    bool PMC6_running = !(env->spr[SPR_POWER_MMCR0] & MMCR0_FC56);
     int sprn;
 
-    for (sprn = SPR_POWER_PMC1; sprn < SPR_POWER_PMC5; sprn++) {
-        update_programmable_PMC_reg(env, sprn, time_delta);
+    if (PMC14_running) {
+        for (sprn = SPR_POWER_PMC1; sprn < SPR_POWER_PMC5; sprn++) {
+            update_programmable_PMC_reg(env, sprn, time_delta);
+        }
     }
 
-    update_PMC_PM_CYC(env, SPR_POWER_PMC6, time_delta);
+    if (PMC6_running) {
+        update_PMC_PM_CYC(env, SPR_POWER_PMC6, time_delta);
+    }
 }
 
 void helper_store_mmcr0(CPUPPCState *env, target_ulong value)
@@ -142,7 +157,7 @@ static bool pmc_counting_insns(CPUPPCState *env, int sprn,
 {
     bool ret = false;
 
-    if (env->spr[SPR_POWER_MMCR0] & MMCR0_FC) {
+    if (!pmc_is_running(env, sprn)) {
         return false;
     }
 
