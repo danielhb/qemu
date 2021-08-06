@@ -137,10 +137,10 @@ void helper_store_mmcr0(CPUPPCState *env, target_ulong value)
     }
 }
 
-static bool pmc_counting_insns(CPUPPCState *env, int sprn)
+static bool pmc_counting_insns(CPUPPCState *env, int sprn,
+                               uint8_t event)
 {
     bool ret = false;
-    uint8_t event;
 
     if (env->spr[SPR_POWER_MMCR0] & MMCR0_FC) {
         return false;
@@ -167,7 +167,13 @@ static bool pmc_counting_insns(CPUPPCState *env, int sprn)
     case SPR_POWER_PMC2:
     case SPR_POWER_PMC3:
     case SPR_POWER_PMC4:
-        return event == 0x2;
+        /*
+         * Event 0xFA is the "instructions completed with run latch
+         * set" event. Consider it as instruction counting event.
+         * The caller is responsible for handling it separately
+         * from PM_INST_CMPL.
+         */
+        return event == 0x2 || event == 0xFA;
     default:
         break;
     }
@@ -180,8 +186,16 @@ void helper_insns_inc(CPUPPCState *env, uint32_t num_insns)
     int sprn;
 
     for (sprn = SPR_POWER_PMC1; sprn <= SPR_POWER_PMC5; sprn++) {
-        if (pmc_counting_insns(env, sprn)) {
-            env->spr[sprn] += num_insns;
+        uint8_t event = get_PMC_event(env, sprn);
+
+        if (pmc_counting_insns(env, sprn, event)) {
+            if (sprn == SPR_POWER_PMC4 && event == 0xFA) {
+                if (env->spr[SPR_CTRL] & CTRL_RUN) {
+                    env->spr[SPR_POWER_PMC4] += num_insns;
+                }
+            } else {
+                env->spr[sprn] += num_insns;
+            }
         }
     }
 }
