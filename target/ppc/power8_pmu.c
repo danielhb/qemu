@@ -143,20 +143,104 @@ static int64_t get_CYC_timeout(CPUPPCState *env, int sprn)
     return remaining_cyc;
 }
 
-static void set_PMU_excp_timer(CPUPPCState *env)
+static bool pmc_counter_negative_enabled(CPUPPCState *env, int sprn)
 {
-    uint64_t timeout, now;
+    switch (sprn) {
+    case SPR_POWER_PMC1:
+        return env->spr[SPR_POWER_MMCR0] & MMCR0_PMC1CE;
 
-    if (!(env->spr[SPR_POWER_MMCR0] & MMCR0_PMC1CE)) {
-        return;
+    case SPR_POWER_PMC2:
+    case SPR_POWER_PMC3:
+    case SPR_POWER_PMC4:
+    case SPR_POWER_PMC5:
+    case SPR_POWER_PMC6:
+        return env->spr[SPR_POWER_MMCR0] & MMCR0_PMCjCE;
+
+    default:
+        break;
     }
 
-    switch (get_PMC_event(env, SPR_POWER_PMC1)) {
-    case 0xF0:
-    case 0x1E:
-        timeout = get_CYC_timeout(env, SPR_POWER_PMC1);
+    return false;
+}
+
+static int64_t get_counter_neg_timeout(CPUPPCState *env, int sprn)
+{
+    int64_t timeout = -1;
+
+    if (!pmc_counter_negative_enabled(env, sprn)) {
+        return -1;
+    }
+
+    if (env->spr[sprn] >= COUNTER_NEGATIVE_VAL) {
+        return 0;
+    }
+
+    switch (sprn) {
+    case SPR_POWER_PMC1:
+    case SPR_POWER_PMC2:
+    case SPR_POWER_PMC3:
+    case SPR_POWER_PMC4:
+        switch (get_PMC_event(env, sprn)) {
+        case 0xF0:
+            if (sprn == SPR_POWER_PMC1) {
+                timeout = get_CYC_timeout(env, sprn);
+            }
+            break;
+        case 0x1E:
+            timeout = get_CYC_timeout(env, sprn);
+            break;
+        }
+
+        break;
+    case SPR_POWER_PMC6:
+        timeout = get_CYC_timeout(env, sprn);
         break;
     default:
+        break;
+    }
+
+    return timeout;
+}
+
+static void set_PMU_excp_timer(CPUPPCState *env)
+{
+    int64_t timeout = -1;
+    uint64_t now;
+    int i;
+
+    /*
+     * Scroll through all PMCs but PMC5 and check which one is
+     * closer to a counter negative timeout with PM_CYC.
+     */
+    for (i = SPR_POWER_PMC1; i <= SPR_POWER_PMC6; i++) {
+        int64_t curr_timeout;
+
+        /* PMC5 doesn't count cycles under any conditions. */
+        if (i == SPR_POWER_PMC5) {
+            continue;
+        }
+
+        curr_timeout = get_counter_neg_timeout(env, i);
+
+        if (curr_timeout == -1) {
+            continue;
+        }
+
+        if (curr_timeout == 0) {
+            timeout = 0;
+            break;
+        }
+
+        if (timeout == -1 || timeout > curr_timeout) {
+            timeout = curr_timeout;
+        }
+    }
+
+    /*
+     * This can happen if counter negative conditions were enabled
+     * without any events to be sampled.
+     */
+    if (timeout == -1) {
         return;
     }
 
@@ -203,7 +287,7 @@ void cpu_ppc_pmu_timer_init(CPUPPCState *env)
 
 static bool counter_negative_cond_enabled(uint64_t mmcr0)
 {
-    return mmcr0 & MMCR0_PMC1CE;
+    return mmcr0 & (MMCR0_PMC1CE | MMCR0_PMCjCE);
 }
 
 void helper_store_mmcr0(CPUPPCState *env, target_ulong value)
