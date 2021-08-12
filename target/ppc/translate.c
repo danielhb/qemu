@@ -8689,6 +8689,7 @@ static void ppc_tr_tb_start(DisasContextBase *db, CPUState *cs)
 
 static void ppc_tr_insn_start(DisasContextBase *dcbase, CPUState *cs)
 {
+    gen_helper_insns_inc(cpu_env);
     tcg_gen_insn_start(dcbase->pc_next);
 }
 
@@ -8754,6 +8755,8 @@ static void ppc_tr_tb_stop(DisasContextBase *dcbase, CPUState *cs)
         /* We have already exited the TB. */
         return;
     }
+
+    gen_helper_insns_dec(cpu_env);
 
     /* Honor single stepping. */
     sse = ctx->singlestep_enabled & (CPU_SINGLE_STEP | GDBSTUB_SINGLE_STEP);

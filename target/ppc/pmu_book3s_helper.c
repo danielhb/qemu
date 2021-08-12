@@ -27,10 +27,9 @@
 #define PPC_CPU_FREQ 1000000000
 #define COUNTER_NEGATIVE_VAL 0x80000000
 
-static uint64_t get_cycles(uint64_t icount_delta)
+static uint64_t get_cycles(uint64_t time_delta)
 {
-    return muldiv64(icount_to_ns(icount_delta), PPC_CPU_FREQ,
-                    NANOSECONDS_PER_SECOND);
+    return time_delta;
 }
 
 static uint8_t get_PMC_event(CPUPPCState *env, int sprn)
@@ -80,16 +79,15 @@ static uint8_t get_PMC_event(CPUPPCState *env, int sprn)
     return event;
 }
 
-static void update_PMC_PM_INST_CMPL(CPUPPCState *env, int sprn,
-                                    uint64_t icount_delta)
+static void update_PMC_PM_INST_CMPL(CPUPPCState *env, int sprn)
 {
-    env->spr[sprn] += icount_delta;
+    env->spr[sprn] += env->pmu_insns_count;
 }
 
 static void update_PMC_PM_CYC(CPUPPCState *env, int sprn,
-                              uint64_t icount_delta)
+                              uint64_t time_delta)
 {
-    env->spr[sprn] += get_cycles(icount_delta);
+    env->spr[sprn] += get_cycles(time_delta);
 }
 
 static int get_stall_ratio(uint8_t stall_event)
@@ -129,7 +127,7 @@ static void update_programmable_PMC_reg(CPUPPCState *env, int sprn,
 
     switch (event) {
     case 0x2:
-        update_PMC_PM_INST_CMPL(env, sprn, icount_delta);
+        update_PMC_PM_INST_CMPL(env, sprn);
         break;
     case 0x1E:
         update_PMC_PM_CYC(env, sprn, icount_delta);
@@ -151,7 +149,7 @@ static void update_programmable_PMC_reg(CPUPPCState *env, int sprn,
  * There is no need to update the base icount of each PMC since
  * the PMU is not running.
  */
-static void update_PMCs(CPUPPCState *env, uint64_t icount_delta)
+static void update_PMCs(CPUPPCState *env, uint64_t time_delta)
 {
     bool PMC14_running = !(env->spr[SPR_POWER_MMCR0] & MMCR0_FC14);
     bool PMC56_running = !(env->spr[SPR_POWER_MMCR0] & MMCR0_FC56);
@@ -159,46 +157,40 @@ static void update_PMCs(CPUPPCState *env, uint64_t icount_delta)
 
     if (PMC14_running) {
         for (sprn = SPR_POWER_PMC1; sprn < SPR_POWER_PMC5; sprn++) {
-            update_programmable_PMC_reg(env, sprn, icount_delta);
+            update_programmable_PMC_reg(env, sprn, time_delta);
         }
     }
 
     if (PMC56_running) {
-        update_PMC_PM_INST_CMPL(env, SPR_POWER_PMC5, icount_delta);
-        update_PMC_PM_CYC(env, SPR_POWER_PMC6, icount_delta);
+        update_PMC_PM_INST_CMPL(env, SPR_POWER_PMC5);
+        update_PMC_PM_CYC(env, SPR_POWER_PMC6, time_delta);
     }
+
+    env->pmu_insns_count = 0;
 }
 
 static int64_t get_INST_CMPL_timeout(CPUPPCState *env, int sprn)
 {
     int64_t remaining_insns;
 
-    if (env->spr[sprn] == 0) {
-        return icount_to_ns(COUNTER_NEGATIVE_VAL);
-    }
-
     if (env->spr[sprn] >= COUNTER_NEGATIVE_VAL) {
         return 0;
     }
 
     remaining_insns = COUNTER_NEGATIVE_VAL - env->spr[sprn];
-    return icount_to_ns(remaining_insns);
+    return remaining_insns;
 }
 
 static int64_t get_CYC_timeout(CPUPPCState *env, int sprn)
 {
     int64_t remaining_cyc;
 
-    if (env->spr[sprn] == 0) {
-        return icount_to_ns(COUNTER_NEGATIVE_VAL);
-    }
-
     if (env->spr[sprn] >= COUNTER_NEGATIVE_VAL) {
         return 0;
     }
 
     remaining_cyc = COUNTER_NEGATIVE_VAL - env->spr[sprn];
-    return muldiv64(remaining_cyc, NANOSECONDS_PER_SECOND, PPC_CPU_FREQ);
+    return remaining_cyc;
 }
 
 static int64_t get_stall_timeout(CPUPPCState *env, int sprn,
@@ -206,10 +198,6 @@ static int64_t get_stall_timeout(CPUPPCState *env, int sprn,
 {
     uint64_t remaining_cyc;
     int stall_multiplier;
-
-    if (env->spr[sprn] == 0) {
-        return icount_to_ns(COUNTER_NEGATIVE_VAL);
-    }
 
     if (env->spr[sprn] >= COUNTER_NEGATIVE_VAL) {
         return 0;
@@ -349,13 +337,13 @@ static void cpu_ppc_pmu_timer_cb(void *opaque)
 {
     PowerPCCPU *cpu = opaque;
     CPUPPCState *env = &cpu->env;
-    uint64_t icount_delta = (uint64_t)icount_get_raw() - env->pmu_base_icount;
+    uint64_t time_delta = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) - env->pmu_base_time;
 
     if (!(env->spr[SPR_POWER_MMCR0] & MMCR0_EBE)) {
         return;
     }
 
-    update_PMCs(env, icount_delta);
+    update_PMCs(env, time_delta);
 
     if (env->spr[SPR_POWER_MMCR0] & MMCR0_FCECE) {
         env->spr[SPR_POWER_MMCR0] &= ~MMCR0_FCECE;
@@ -387,7 +375,7 @@ static bool counter_negative_cond_enabled(uint64_t mmcr0)
 
 void helper_store_mmcr0(CPUPPCState *env, target_ulong value)
 {
-    uint64_t curr_icount = (uint64_t)icount_get_raw();
+    uint64_t curr_time = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
     bool curr_FC = env->spr[SPR_POWER_MMCR0] & MMCR0_FC;
     bool new_FC = value & MMCR0_FC;
 
@@ -406,21 +394,19 @@ void helper_store_mmcr0(CPUPPCState *env, target_ulong value)
      */
     if (curr_FC != new_FC) {
         if (!curr_FC) {
-            uint64_t icount_delta = (curr_icount - env->pmu_base_icount);
-
-            /* Exclude both mtsprs() that opened and closed the timer */
-            icount_delta -= 2;
+            uint64_t time_delta = (curr_time - env->pmu_base_time);
 
             /*
              * Update the counter with the instructions run
              * until the freeze.
              */
-            update_PMCs(env, icount_delta);
+            update_PMCs(env, time_delta);
 
             /* delete pending timer */
             timer_del(env->pmu_intr_timer);
         } else {
-            env->pmu_base_icount = curr_icount;
+            env->pmu_base_time = curr_time;
+            env->pmu_insns_count = 0;
 
             /*
              * Start performance monitor alert timer for counter negative
@@ -436,18 +422,18 @@ void helper_store_mmcr0(CPUPPCState *env, target_ulong value)
 void helper_store_pmc(CPUPPCState *env, uint32_t sprn, uint64_t value)
 {
     bool pmu_frozen = env->spr[SPR_POWER_MMCR0] & MMCR0_FC;
-    uint64_t curr_icount, icount_delta;
+    uint64_t curr_time, time_delta;
 
     if (pmu_frozen) {
         env->spr[sprn] = value;
         return;
     }
 
-    curr_icount = (uint64_t)icount_get_raw();
-    icount_delta = curr_icount - env->pmu_base_icount;
+    curr_time = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+    time_delta = curr_time - env->pmu_base_time;
 
     /* Update the counter with the events counted so far */
-    update_PMCs(env, icount_delta);
+    update_PMCs(env, time_delta);
 
     /* Set the counter to the desirable value after update_PMCs() */
     env->spr[sprn] = value;
@@ -458,9 +444,19 @@ void helper_store_pmc(CPUPPCState *env, uint32_t sprn, uint64_t value)
      */
     timer_del(env->pmu_intr_timer);
 
-    env->pmu_base_icount = curr_icount;
+    env->pmu_base_time = curr_time;
 
     if (counter_negative_cond_enabled(env->spr[SPR_POWER_MMCR0])) {
         set_PMU_excp_timer(env);
     }
+}
+
+void helper_insns_inc(CPUPPCState *env)
+{
+    env->pmu_insns_count++;
+}
+
+void helper_insns_dec(CPUPPCState *env)
+{
+    env->pmu_insns_count--;
 }
