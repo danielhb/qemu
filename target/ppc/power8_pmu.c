@@ -376,6 +376,8 @@ static bool pmc_counting_insns(CPUPPCState *env, int sprn,
 
 void helper_insns_inc(CPUPPCState *env, uint32_t num_insns)
 {
+    bool counter_neg_triggered = false;
+    PowerPCCPU *cpu;
     int sprn;
 
     for (sprn = SPR_POWER_PMC1; sprn <= SPR_POWER_PMC5; sprn++) {
@@ -389,7 +391,21 @@ void helper_insns_inc(CPUPPCState *env, uint32_t num_insns)
             } else {
                 env->spr[sprn] += num_insns;
             }
+
+            if (env->spr[sprn] >= COUNTER_NEGATIVE_VAL &&
+                pmc_counter_negative_enabled(env, sprn)) {
+                counter_neg_triggered = true;
+                env->spr[sprn] = COUNTER_NEGATIVE_VAL;
+            }
         }
+    }
+
+    if (counter_neg_triggered) {
+        /* delete pending timer */
+        timer_del(env->pmu_intr_timer);
+
+        cpu = env_archcpu(env);
+        cpu_ppc_pmu_timer_cb(cpu);
     }
 }
 
