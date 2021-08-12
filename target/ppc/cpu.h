@@ -1207,7 +1207,9 @@ struct CPUPPCState {
      * PMU icount base value used by the PMU to calculate
      * instructions and cycles.
      */
-    uint64_t pmu_base_icount;
+    uint64_t pmu_base_time;
+
+    uint64_t pmu_insns_count;
 
     /*
      * Timer used to fire performance monitor alerts and interrupts.
