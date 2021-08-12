@@ -27,16 +27,9 @@ static uint64_t get_cycles(uint64_t time_delta)
     return time_delta;
 }
 
-static void update_PMC_PM_CYC(CPUPPCState *env, int sprn,
-                              uint64_t time_delta)
+static uint8_t get_PMC_event(CPUPPCState *env, int sprn)
 {
-    env->spr[sprn] += get_cycles(time_delta);
-}
-
-static void update_programmable_PMC_reg(CPUPPCState *env, int sprn,
-                                        uint64_t time_delta)
-{
-    uint8_t event;
+    int event = 0x0;
 
     switch (sprn) {
     case SPR_POWER_PMC1:
@@ -55,8 +48,22 @@ static void update_programmable_PMC_reg(CPUPPCState *env, int sprn,
         event = MMCR1_PMC4SEL & env->spr[SPR_POWER_MMCR1];
         break;
     default:
-        return;
+        break;
     }
+
+    return event;
+}
+
+static void update_PMC_PM_CYC(CPUPPCState *env, int sprn,
+                              uint64_t time_delta)
+{
+    env->spr[sprn] += get_cycles(time_delta);
+}
+
+static void update_programmable_PMC_reg(CPUPPCState *env, int sprn,
+                                        uint64_t time_delta)
+{
+    uint8_t event = get_PMC_event(env, sprn);
 
     /*
      * MMCR0_PMC1SEL = 0xF0 is the architected PowerISA v3.1 event
@@ -126,6 +133,46 @@ void helper_store_mmcr0(CPUPPCState *env, target_ulong value)
             update_PMCs(env, time_delta);
         } else {
             env->pmu_base_time = curr_time;
+        }
+    }
+}
+
+static bool pmc_counting_insns(CPUPPCState *env, int sprn)
+{
+    bool ret = false;
+    uint8_t event;
+
+    if (env->spr[SPR_POWER_MMCR0] & MMCR0_FC) {
+        return false;
+    }
+
+    if (sprn == SPR_POWER_PMC5) {
+        return true;
+    }
+
+    event = get_PMC_event(env, sprn);
+
+    switch (sprn) {
+    case SPR_POWER_PMC1:
+        return event == 0x2 || event == 0xF2 || event == 0xFE;
+    case SPR_POWER_PMC2:
+    case SPR_POWER_PMC3:
+    case SPR_POWER_PMC4:
+        return event == 0x2;
+    default:
+        break;
+    }
+
+    return ret;
+}
+
+void helper_insns_inc(CPUPPCState *env, uint32_t num_insns)
+{
+    int sprn;
+
+    for (sprn = SPR_POWER_PMC1; sprn <= SPR_POWER_PMC5; sprn++) {
+        if (pmc_counting_insns(env, sprn)) {
+            env->spr[sprn] += num_insns;
         }
     }
 }
