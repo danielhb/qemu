@@ -340,7 +340,7 @@ static bool trans_RFEBB(DisasContext *ctx, arg_RFEBB *arg)
     gen_update_cfar(ctx, ctx->cia);
     gen_helper_rfebb(cpu_env, cpu_gpr[arg->s]);
 
-    ctx->base.is_jmp = DISAS_EXIT;
+    ctx->base.is_jmp = DISAS_CHAIN;
 
     return true;
 }
