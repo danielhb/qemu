@@ -176,6 +176,7 @@ struct DisasContext {
     bool tm_enabled;
     bool gtse;
     bool pmcc_clear;
+    bool pmu_fc;
     ppc_spr_t *spr_cb; /* Needed to check rights for mfspr/mtspr */
     int singlestep_enabled;
     uint32_t flags;
@@ -8674,6 +8675,7 @@ static void ppc_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cs)
     ctx->tm_enabled = (hflags >> HFLAGS_TM) & 1;
     ctx->gtse = (hflags >> HFLAGS_GTSE) & 1;
     ctx->pmcc_clear = (hflags >> HFLAGS_PMCCCLEAR) & 1;
+    ctx->pmu_fc = (hflags >> HFLAGS_PMUFC) & 1;
 
     ctx->singlestep_enabled = 0;
     if ((hflags >> HFLAGS_SE) & 1) {
@@ -8697,7 +8699,12 @@ static void ppc_tr_tb_start(DisasContextBase *db, CPUState *cs)
 
 static void ppc_tr_insn_start(DisasContextBase *dcbase, CPUState *cs)
 {
-    gen_helper_insns_inc(cpu_env);
+    DisasContext *ctx = container_of(dcbase, DisasContext, base);
+
+    if (!ctx->pmu_fc) {
+        gen_helper_insns_inc(cpu_env);
+    }
+
     tcg_gen_insn_start(dcbase->pc_next);
 }
 
@@ -8763,8 +8770,6 @@ static void ppc_tr_tb_stop(DisasContextBase *dcbase, CPUState *cs)
         /* We have already exited the TB. */
         return;
     }
-
-    gen_helper_insns_dec(cpu_env);
 
     /* Honor single stepping. */
     sse = ctx->singlestep_enabled & (CPU_SINGLE_STEP | GDBSTUB_SINGLE_STEP);

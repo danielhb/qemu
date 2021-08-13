@@ -10,9 +10,9 @@
  * See the COPYING file in the top-level directory.
  */
 
-#include "pmu_book3s_helper.h"
-
 #include "qemu/osdep.h"
+
+#include "pmu_book3s_helper.h"
 #include "cpu.h"
 #include "helper_regs.h"
 #include "exec/exec-all.h"
@@ -20,6 +20,7 @@
 #include "qemu/error-report.h"
 #include "qemu/main-loop.h"
 #include "hw/ppc/ppc.h"
+ #include "helper_regs.h"
 
 /*
  * Set arbitrarily based on clock-frequency values used in PNV
@@ -349,6 +350,8 @@ static void cpu_ppc_pmu_timer_cb(void *opaque)
     if (env->spr[SPR_POWER_MMCR0] & MMCR0_FCECE) {
         env->spr[SPR_POWER_MMCR0] &= ~MMCR0_FCECE;
         env->spr[SPR_POWER_MMCR0] |= MMCR0_FC;
+
+        hreg_compute_hflags(env);
     }
 
     if (env->spr[SPR_POWER_MMCR0] & MMCR0_PMAE) {
@@ -397,6 +400,8 @@ void helper_store_mmcr0(CPUPPCState *env, target_ulong value)
      * passed.
      */
     if (curr_FC != new_FC) {
+        hreg_compute_hflags(env);
+
         if (!curr_FC) {
             uint64_t time_delta = (curr_time - env->pmu_base_time);
 
