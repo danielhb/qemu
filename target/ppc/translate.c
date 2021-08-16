@@ -182,6 +182,7 @@ struct DisasContext {
     uint32_t flags;
     uint64_t insns_flags;
     uint64_t insns_flags2;
+    uint32_t num_insns;
 };
 
 #define DISAS_EXIT         DISAS_TARGET_0  /* exit to main loop, pc updated */
@@ -4434,6 +4435,15 @@ static inline void gen_update_cfar(DisasContext *ctx, target_ulong nip)
 #endif
 }
 
+static void pmu_count_insns(DisasContext *ctx)
+{
+    if (ctx->pmu_fc) {
+        return;
+    }
+
+    gen_helper_insns_inc(cpu_env, tcg_constant_i32(ctx->base.num_insns));
+}
+
 static inline bool use_goto_tb(DisasContext *ctx, target_ulong dest)
 {
     return translator_use_goto_tb(&ctx->base, dest);
@@ -4448,9 +4458,13 @@ static void gen_lookup_and_goto_ptr(DisasContext *ctx)
         } else if (sse & (CPU_SINGLE_STEP | CPU_BRANCH_STEP)) {
             gen_helper_raise_exception(cpu_env, tcg_constant_i32(gen_prep_dbgex(ctx)));
         } else {
+            pmu_count_insns(ctx);
             tcg_gen_exit_tb(NULL, 0);
         }
     } else {
+        if (ctx->base.tb->flags & CF_NO_GOTO_PTR) {
+            pmu_count_insns(ctx);
+        }
         tcg_gen_lookup_and_goto_ptr();
     }
 }
@@ -4462,6 +4476,8 @@ static void gen_goto_tb(DisasContext *ctx, int n, target_ulong dest)
         dest = (uint32_t) dest;
     }
     if (use_goto_tb(ctx, dest)) {
+        pmu_count_insns(ctx);
+
         tcg_gen_goto_tb(n);
         tcg_gen_movi_tl(cpu_nip, dest & ~3);
         tcg_gen_exit_tb(ctx->base.tb, n);
@@ -8691,6 +8707,8 @@ static void ppc_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cs)
     if (ctx->singlestep_enabled & (CPU_SINGLE_STEP | GDBSTUB_SINGLE_STEP)) {
         ctx->base.max_insns = 1;
     }
+
+    ctx->num_insns = 0;
 }
 
 static void ppc_tr_tb_start(DisasContextBase *db, CPUState *cs)
@@ -8699,12 +8717,6 @@ static void ppc_tr_tb_start(DisasContextBase *db, CPUState *cs)
 
 static void ppc_tr_insn_start(DisasContextBase *dcbase, CPUState *cs)
 {
-    DisasContext *ctx = container_of(dcbase, DisasContext, base);
-
-    if (!ctx->pmu_fc) {
-        gen_helper_insns_inc(cpu_env);
-    }
-
     tcg_gen_insn_start(dcbase->pc_next);
 }
 
@@ -8751,6 +8763,10 @@ static void ppc_tr_translate_insn(DisasContextBase *dcbase, CPUState *cs)
         gen_invalid(ctx);
     }
 
+    // if (!ctx->pmu_fc) {
+//         gen_helper_insns_inc(cpu_env, tcg_constant_i32(1));
+    // }
+
     /* End the TB when crossing a page boundary. */
     if (ctx->base.is_jmp == DISAS_NEXT && !(pc & ~TARGET_PAGE_MASK)) {
         ctx->base.is_jmp = DISAS_TOO_MANY;
@@ -8765,6 +8781,23 @@ static void ppc_tr_tb_stop(DisasContextBase *dcbase, CPUState *cs)
     DisasJumpType is_jmp = ctx->base.is_jmp;
     target_ulong nip = ctx->base.pc_next;
     int sse;
+
+#if 0
+    TCGv t_pmc1 = tcg_temp_new();
+    TCGv t_pmc5 = tcg_temp_new();
+
+    gen_load_spr(t_pmc1, SPR_POWER_PMC1);
+    gen_load_spr(t_pmc5, SPR_POWER_PMC5);
+    tcg_gen_addi_tl(t_pmc1, t_pmc1, dcbase->num_insns);
+    tcg_gen_addi_tl(t_pmc5, t_pmc5, dcbase->num_insns);
+    gen_store_spr(SPR_POWER_PMC1, t_pmc1);
+    gen_store_spr(SPR_POWER_PMC5, t_pmc5);
+    tcg_temp_free(t_pmc1);
+    tcg_temp_free(t_pmc5);
+
+#endif
+
+    // gen_helper_insns_inc(cpu_env, tcg_constant_i32(dcbase->num_insns));
 
     if (is_jmp == DISAS_NORETURN) {
         /* We have already exited the TB. */
@@ -8801,6 +8834,8 @@ static void ppc_tr_tb_stop(DisasContextBase *dcbase, CPUState *cs)
     switch (is_jmp) {
     case DISAS_TOO_MANY:
         if (use_goto_tb(ctx, nip)) {
+            pmu_count_insns(ctx);
+
             tcg_gen_goto_tb(0);
             gen_update_nip(ctx, nip);
             tcg_gen_exit_tb(ctx->base.tb, 0);
@@ -8811,6 +8846,10 @@ static void ppc_tr_tb_stop(DisasContextBase *dcbase, CPUState *cs)
         gen_update_nip(ctx, nip);
         /* fall through */
     case DISAS_CHAIN:
+        if (ctx->base.tb->flags & CF_NO_GOTO_PTR) {
+            pmu_count_insns(ctx);
+        }
+
         tcg_gen_lookup_and_goto_ptr();
         break;
 
@@ -8818,6 +8857,8 @@ static void ppc_tr_tb_stop(DisasContextBase *dcbase, CPUState *cs)
         gen_update_nip(ctx, nip);
         /* fall through */
     case DISAS_EXIT:
+        pmu_count_insns(ctx);
+
         tcg_gen_exit_tb(NULL, 0);
         break;
 

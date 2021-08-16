@@ -460,12 +460,12 @@ void helper_store_pmc(CPUPPCState *env, uint32_t sprn, uint64_t value)
     }
 }
 
-void helper_insns_inc(CPUPPCState *env)
+void helper_insns_inc(CPUPPCState *env, uint32_t num_insns)
 {
-    env->pmu_insns_count++;
+    env->pmu_insns_count += num_insns;
 }
 
-void helper_insns_dec(CPUPPCState *env)
+void helper_insns_dec(CPUPPCState *env, uint32_t num_insns)
 {
-    env->pmu_insns_count--;
+    env->pmu_insns_count -= num_insns;
 }
