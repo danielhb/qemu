@@ -171,18 +171,6 @@ static void update_PMCs(CPUPPCState *env, uint64_t time_delta)
     // env->pmu_insns_count = 0;
 }
 
-static int64_t get_INST_CMPL_timeout(CPUPPCState *env, int sprn)
-{
-    int64_t remaining_insns;
-
-    if (env->spr[sprn] >= COUNTER_NEGATIVE_VAL) {
-        return 0;
-    }
-
-    remaining_insns = COUNTER_NEGATIVE_VAL - env->spr[sprn];
-    return remaining_insns;
-}
-
 static int64_t get_CYC_timeout(CPUPPCState *env, int sprn)
 {
     int64_t remaining_cyc;
@@ -265,9 +253,6 @@ static int64_t get_counter_neg_timeout(CPUPPCState *env, int sprn)
         event = get_PMC_event(env, sprn);
 
         switch (event) {
-        case 0x2:
-            timeout = get_INST_CMPL_timeout(env, sprn);
-            break;
         case 0x1E:
             timeout = get_CYC_timeout(env, sprn);
             break;
@@ -280,10 +265,6 @@ static int64_t get_counter_neg_timeout(CPUPPCState *env, int sprn)
         default:
             break;
         }
-
-        break;
-    case SPR_POWER_PMC5:
-        timeout = get_INST_CMPL_timeout(env, sprn);
         break;
     case SPR_POWER_PMC6:
         timeout = get_CYC_timeout(env, sprn);
@@ -498,12 +479,28 @@ static bool pmc_counting_insns(CPUPPCState *env, int sprn)
 
 void helper_insns_inc(CPUPPCState *env, uint32_t num_insns)
 {
+    bool counter_neg_triggered = false;
+    PowerPCCPU *cpu;
     int sprn;
 
     for (sprn = SPR_POWER_PMC1; sprn <= SPR_POWER_PMC5; sprn++) {
         if (pmc_counting_insns(env, sprn)) {
             env->spr[sprn] += num_insns;
+
+            if (env->spr[sprn] >= COUNTER_NEGATIVE_VAL &&
+                pmc_counter_negative_enabled(env, sprn)) {
+                counter_neg_triggered = true;
+                env->spr[sprn] = COUNTER_NEGATIVE_VAL;
+            }
         }
+    }
+
+    if (counter_neg_triggered) {
+        /* delete pending timer */
+        timer_del(env->pmu_intr_timer);
+
+        cpu = env_archcpu(env);
+        cpu_ppc_pmu_timer_cb(cpu);
     }
 }
 
