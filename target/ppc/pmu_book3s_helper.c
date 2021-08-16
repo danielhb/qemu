@@ -83,7 +83,8 @@ static uint8_t get_PMC_event(CPUPPCState *env, int sprn)
 
 static void update_PMC_PM_INST_CMPL(CPUPPCState *env, int sprn)
 {
-    env->spr[sprn] += env->pmu_insns_count;
+    return;
+    // env->spr[sprn] += env->pmu_insns_count;
 }
 
 static void update_PMC_PM_CYC(CPUPPCState *env, int sprn,
@@ -168,7 +169,7 @@ static void update_PMCs(CPUPPCState *env, uint64_t time_delta)
         update_PMC_PM_CYC(env, SPR_POWER_PMC6, time_delta);
     }
 
-    env->pmu_insns_count = 0;
+    // env->pmu_insns_count = 0;
 }
 
 static int64_t get_INST_CMPL_timeout(CPUPPCState *env, int sprn)
@@ -415,7 +416,7 @@ void helper_store_mmcr0(CPUPPCState *env, target_ulong value)
             timer_del(env->pmu_intr_timer);
         } else {
             env->pmu_base_time = curr_time;
-            env->pmu_insns_count = 0;
+            // env->pmu_insns_count = 0;
 
             /*
              * Start performance monitor alert timer for counter negative
@@ -460,9 +461,54 @@ void helper_store_pmc(CPUPPCState *env, uint32_t sprn, uint64_t value)
     }
 }
 
+static bool pmc_is_running(CPUPPCState *env, int sprn)
+{
+    if (sprn < SPR_POWER_PMC5) {
+        return !(env->spr[SPR_POWER_MMCR0] & MMCR0_FC14);
+    }
+
+    return !(env->spr[SPR_POWER_MMCR0] & MMCR0_FC56);
+}
+
+static bool pmc_counting_insns(CPUPPCState *env, int sprn)
+{
+    bool ret = false;
+    uint8_t event;
+
+    if (!pmc_is_running(env, sprn)) {
+        return false;
+    }
+
+    if (sprn == SPR_POWER_PMC5) {
+        return true;
+    }
+
+    event = get_PMC_event(env, sprn);
+
+    switch (sprn) {
+    case SPR_POWER_PMC1:
+        return event == 0x2 || event == 0xF2 || event == 0xFE;
+    case SPR_POWER_PMC2:
+    case SPR_POWER_PMC3:
+        return event == 0x2;
+    case SPR_POWER_PMC4:
+        return event == 0x2 || event == 0xFA;
+    default:
+        break;
+    }
+
+    return ret;
+}
+
 void helper_insns_inc(CPUPPCState *env, uint32_t num_insns)
 {
-    env->pmu_insns_count += num_insns;
+    int sprn;
+
+    for (sprn = SPR_POWER_PMC1; sprn <= SPR_POWER_PMC5; sprn++) {
+        if (pmc_counting_insns(env, sprn)) {
+            env->spr[sprn] += num_insns;
+        }
+    }
 }
 
 void helper_insns_dec(CPUPPCState *env, uint32_t num_insns)
