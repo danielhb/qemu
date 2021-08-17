@@ -175,6 +175,7 @@ struct DisasContext {
     bool spe_enabled;
     bool tm_enabled;
     bool gtse;
+    bool pmcc_clear;
     ppc_spr_t *spr_cb; /* Needed to check rights for mfspr/mtspr */
     int singlestep_enabled;
     uint32_t flags;
@@ -523,6 +524,16 @@ void spr_read_ureg(DisasContext *ctx, int gprn, int sprn)
 void spr_write_ureg(DisasContext *ctx, int sprn, int gprn)
 {
     gen_store_spr(sprn + 0x10, cpu_gpr[gprn]);
+}
+#else
+/*
+ * Define spr_write_ureg() as spr_noaccess() so cpu_init.c can use
+ * this callback when compiling with CONFIG_USER_ONLY and/or
+ * !TARGET_PPC64.
+ */
+void spr_write_ureg(DisasContext *ctx, int sprn, int gprn)
+{
+    spr_noaccess(ctx, gprn, sprn);
 }
 #endif
 
@@ -8541,6 +8552,7 @@ static void ppc_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cs)
     ctx->vsx_enabled = (hflags >> HFLAGS_VSX) & 1;
     ctx->tm_enabled = (hflags >> HFLAGS_TM) & 1;
     ctx->gtse = (hflags >> HFLAGS_GTSE) & 1;
+    ctx->pmcc_clear = (hflags >> HFLAGS_PMCCCLEAR) & 1;
 
     ctx->singlestep_enabled = 0;
     if ((hflags >> HFLAGS_SE) & 1) {
