@@ -95,6 +95,7 @@ void spr_read_mas73(DisasContext *ctx, int gprn, int sprn);
 void spr_read_cfar(DisasContext *ctx, int gprn, int sprn);
 void spr_write_cfar(DisasContext *ctx, int sprn, int gprn);
 void spr_write_ureg(DisasContext *ctx, int sprn, int gprn);
+void spr_write_PMU_groupA_ureg(DisasContext *ctx, int sprn, int gprn);
 void spr_read_purr(DisasContext *ctx, int gprn, int sprn);
 void spr_write_purr(DisasContext *ctx, int sprn, int gprn);
 void spr_read_hdecr(DisasContext *ctx, int gprn, int sprn);
