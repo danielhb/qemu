@@ -265,8 +265,6 @@ static void cpu_ppc_pmu_timer_cb(void *opaque)
     if (env->spr[SPR_POWER_MMCR0] & MMCR0_FCECE) {
         env->spr[SPR_POWER_MMCR0] &= ~MMCR0_FCECE;
         env->spr[SPR_POWER_MMCR0] |= MMCR0_FC;
-
-        hreg_compute_hflags(env);
     }
 
     if (env->spr[SPR_POWER_MMCR0] & MMCR0_PMAE) {
