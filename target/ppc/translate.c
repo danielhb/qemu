@@ -2712,6 +2712,7 @@ static void gen_darn(DisasContext *ctx)
         }
     }
 }
+
 #endif
 
 /***                             Integer rotate                            ***/
