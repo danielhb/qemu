@@ -4436,9 +4436,12 @@ static inline void gen_update_cfar(DisasContext *ctx, target_ulong nip)
 
 static void pmu_count_insns(DisasContext *ctx)
 {
-    if (ctx->pmu_fc) {
-        return;
-    }
+    TCGv t0 = tcg_temp_new();
+    TCGLabel *l_exit = gen_new_label();
+
+    gen_load_spr(t0, SPR_POWER_MMCR0);
+    tcg_gen_andi_tl(t0, t0, MMCR0_FC);
+    tcg_gen_brcond_tl(TCG_COND_EQ, t0, tcg_const_i64(MMCR0_FC), l_exit);
 
     /*
      * The PMU insns_inc() helper stops the internal PMU timer if a
@@ -4447,8 +4450,10 @@ static void pmu_count_insns(DisasContext *ctx)
      * the helper can trigger a 'bad icount read'.
      */
     gen_icount_io_start(ctx);
-
     gen_helper_insns_inc(cpu_env, tcg_constant_i32(ctx->base.num_insns));
+
+    gen_set_label(l_exit);
+    tcg_temp_free(t0);
 }
 
 static inline bool use_goto_tb(DisasContext *ctx, target_ulong dest)
