@@ -259,7 +259,6 @@ struct SpaprMachineState {
 
     uint32_t *FORM1_assoc_array[NUMA_NODES_MAX_NUM];
     uint32_t *FORM2_assoc_array[NUMA_NODES_MAX_NUM];
-    uint32_t **numa_assoc_array;
 
     Error *fwnmi_migration_blocker;
 };

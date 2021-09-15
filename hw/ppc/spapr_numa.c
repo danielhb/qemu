@@ -54,6 +54,15 @@ static int get_vcpu_assoc_size(SpaprMachineState *spapr)
     return get_numa_assoc_size(spapr) + 1;
 }
 
+static uint32_t *get_associativity(SpaprMachineState *spapr, int node_id)
+{
+    if (spapr_ovec_test(spapr->ov5_cas, OV5_FORM2_AFFINITY)) {
+        return spapr->FORM2_assoc_array[node_id];
+    }
+
+    return spapr->FORM1_assoc_array[node_id];
+}
+
 static bool spapr_numa_is_symmetrical(MachineState *ms)
 {
     int src, dst;
@@ -332,31 +341,13 @@ void spapr_numa_associativity_init(SpaprMachineState *spapr,
 {
     spapr_numa_FORM1_affinity_init(spapr, machine);
     spapr_numa_FORM2_affinity_init(spapr);
-
-    /*
-     * Default to FORM1 affinity until CAS. We'll call affinity_reset()
-     * during CAS when we're sure about which NUMA affinity the guest
-     * is going to use.
-     *
-     * This step is a failsafe - guests in the wild were able to read
-     * FORM1 affinity info before CAS for a long time. Since affinity_reset()
-     * is just a pointer switch between data that was already populated
-     * here, this is an acceptable overhead to be on the safer side.
-     */
-    spapr->numa_assoc_array = spapr->FORM1_assoc_array;
 }
 
 void spapr_numa_associativity_reset(SpaprMachineState *spapr,
                                     bool post_CAS_check)
 {
-    if (spapr_ovec_test(spapr->ov5_cas, OV5_FORM2_AFFINITY)) {
-        spapr->numa_assoc_array = spapr->FORM2_assoc_array;
-        return;
-    }
-
-    spapr->numa_assoc_array = spapr->FORM1_assoc_array;
-
-    if (post_CAS_check) {
+    if (!spapr_ovec_test(spapr->ov5_cas, OV5_FORM2_AFFINITY) &&
+        post_CAS_check) {
         spapr_numa_FORM1_affinity_check(MACHINE(spapr));
     }
 }
@@ -364,9 +355,11 @@ void spapr_numa_associativity_reset(SpaprMachineState *spapr,
 void spapr_numa_write_associativity_dt(SpaprMachineState *spapr, void *fdt,
                                        int offset, int nodeid)
 {
+    uint32_t *numa_assoc_array = get_associativity(spapr, nodeid);
+
     /* Hardcode the size of FORM1 associativity array for now */
     _FDT((fdt_setprop(fdt, offset, "ibm,associativity",
-                      spapr->numa_assoc_array[nodeid],
+                      numa_assoc_array,
                       get_numa_assoc_size(spapr) * sizeof(uint32_t))));
 }
 
@@ -376,6 +369,7 @@ static uint32_t *spapr_numa_get_vcpu_assoc(SpaprMachineState *spapr,
     int max_distance_ref_points = get_max_dist_ref_points(spapr);
     int vcpu_assoc_size = get_vcpu_assoc_size(spapr);
     uint32_t *vcpu_assoc = g_new(uint32_t, vcpu_assoc_size);
+    uint32_t *numa_assoc_array = get_associativity(spapr, cpu->node_id);
     int index = spapr_get_vcpu_id(cpu);
 
     /*
@@ -386,7 +380,7 @@ static uint32_t *spapr_numa_get_vcpu_assoc(SpaprMachineState *spapr,
      */
     vcpu_assoc[0] = cpu_to_be32(max_distance_ref_points + 1);
     vcpu_assoc[vcpu_assoc_size - 1] = cpu_to_be32(index);
-    memcpy(vcpu_assoc + 1, spapr->numa_assoc_array[cpu->node_id] + 1,
+    memcpy(vcpu_assoc + 1, numa_assoc_array + 1,
            (vcpu_assoc_size - 2) * sizeof(uint32_t));
 
     return vcpu_assoc;
@@ -428,7 +422,7 @@ int spapr_numa_write_assoc_lookup_arrays(SpaprMachineState *spapr, void *fdt,
          * For the lookup-array we use the ibm,associativity array,
          * from numa_assoc_array. without the first element (size).
          */
-        uint32_t *associativity = spapr->numa_assoc_array[i];
+        uint32_t *associativity = get_associativity(spapr, i);
         memcpy(cur_index, ++associativity,
                sizeof(uint32_t) * max_distance_ref_points);
         cur_index += max_distance_ref_points;
