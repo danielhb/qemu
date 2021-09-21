@@ -19,6 +19,9 @@
 /* Moved from hw/ppc/spapr_pci_nvlink2.c */
 #define SPAPR_GPU_NUMA_ID           (cpu_to_be32(1))
 
+/* Macro to avoid hardcoding the local distance value */
+#define NUMA_LOCAL_DISTANCE         10
+
 /*
  * Retrieves max_dist_ref_points of the current NUMA affinity.
  */
@@ -500,17 +503,21 @@ static void spapr_numa_FORM2_write_rtas_tables(SpaprMachineState *spapr,
     MachineState *ms = MACHINE(spapr);
     NodeInfo *numa_info = ms->numa_state->nodes;
     int nb_numa_nodes = ms->numa_state->num_nodes;
+    /* Lookup index table has an extra uint32_t with its length */
+    uint32_t lookup_index_table[nb_numa_nodes + 1];
     int distance_table_entries = nb_numa_nodes * nb_numa_nodes;
-    g_autofree uint32_t *lookup_index_table = NULL;
-    g_autofree uint32_t *distance_table = NULL;
-    int src, dst, i, distance_table_size;
-    uint8_t *node_distances;
+    /*
+     * Distance table is an uint8_t array with a leading uint32_t
+     * containing its length.
+     */
+    uint8_t distance_table[distance_table_entries + 4];
+    uint32_t *distance_table_length;
+    int src, dst, i;
 
     /*
      * ibm,numa-lookup-index-table: array with length and a
      * list of NUMA ids present in the guest.
      */
-    lookup_index_table = g_new0(uint32_t, nb_numa_nodes + 1);
     lookup_index_table[0] = cpu_to_be32(nb_numa_nodes);
 
     for (i = 0; i < nb_numa_nodes; i++) {
@@ -518,8 +525,7 @@ static void spapr_numa_FORM2_write_rtas_tables(SpaprMachineState *spapr,
     }
 
     _FDT(fdt_setprop(fdt, rtas, "ibm,numa-lookup-index-table",
-                     lookup_index_table,
-                     (nb_numa_nodes + 1) * sizeof(uint32_t)));
+                     lookup_index_table, sizeof(lookup_index_table)));
 
     /*
      * ibm,numa-distance-table: contains all node distances. First
@@ -531,11 +537,10 @@ static void spapr_numa_FORM2_write_rtas_tables(SpaprMachineState *spapr,
      * array because NUMA ids can be sparse (node 0 is the first,
      * node 8 is the second ...).
      */
-    distance_table = g_new0(uint32_t, distance_table_entries + 1);
-    distance_table[0] = cpu_to_be32(distance_table_entries);
+    distance_table_length = (uint32_t *)distance_table;
+    distance_table_length[0] = cpu_to_be32(distance_table_entries);
 
-    node_distances = (uint8_t *)&distance_table[1];
-    i = 0;
+    i = 4;
 
     for (src = 0; src < nb_numa_nodes; src++) {
         for (dst = 0; dst < nb_numa_nodes; dst++) {
@@ -546,18 +551,16 @@ static void spapr_numa_FORM2_write_rtas_tables(SpaprMachineState *spapr,
              * adding the numa_info to retrieve distance info from.
              */
             if (src == dst) {
-                node_distances[i++] = 10;
+                distance_table[i++] = NUMA_LOCAL_DISTANCE;
                 continue;
             }
 
-            node_distances[i++] = numa_info[src].distance[dst];
+            distance_table[i++] = numa_info[src].distance[dst];
         }
     }
 
-    distance_table_size = distance_table_entries * sizeof(uint8_t) +
-                          sizeof(uint32_t);
     _FDT(fdt_setprop(fdt, rtas, "ibm,numa-distance-table",
-                     distance_table, distance_table_size));
+                     distance_table, sizeof(distance_table)));
 }
 
 /*
