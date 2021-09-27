@@ -175,6 +175,8 @@ struct DisasContext {
     bool spe_enabled;
     bool tm_enabled;
     bool gtse;
+    bool mmcr0_pmcc0;
+    bool mmcr0_pmcc1;
     ppc_spr_t *spr_cb; /* Needed to check rights for mfspr/mtspr */
     int singlestep_enabled;
     uint32_t flags;
@@ -8539,6 +8541,8 @@ static void ppc_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cs)
     ctx->vsx_enabled = (hflags >> HFLAGS_VSX) & 1;
     ctx->tm_enabled = (hflags >> HFLAGS_TM) & 1;
     ctx->gtse = (hflags >> HFLAGS_GTSE) & 1;
+    ctx->mmcr0_pmcc0 = (hflags >> HFLAGS_PMCC0) & 1;
+    ctx->mmcr0_pmcc1 = (hflags >> HFLAGS_PMCC1) & 1;
 
     ctx->singlestep_enabled = 0;
     if ((hflags >> HFLAGS_SE) & 1) {
