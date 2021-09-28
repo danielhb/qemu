@@ -103,6 +103,42 @@ void spr_write_MMCR0_ureg(DisasContext *ctx, int sprn, int gprn)
     tcg_temp_free(t0);
     tcg_temp_free(t1);
 }
+
+void spr_read_MMCR2_ureg(DisasContext *ctx, int gprn, int sprn)
+{
+    TCGv t0;
+
+    if (!spr_groupA_read_allowed(ctx)) {
+        return;
+    }
+
+    t0 = tcg_temp_new();
+
+    /*
+     * On read, filter out all bits that are not FCnP0 bits.
+     * When MMCR0[PMCC] is set to 0b10 or 0b11, providing
+     * problem state programs read/write access to MMCR2,
+     * only the FCnP0 bits can be accessed. All other bits are
+     * not changed when mtspr is executed in problem state, and
+     * all other bits return 0s when mfspr is executed in problem
+     * state, according to ISA v3.1, section 10.4.6 Monitor Mode
+     * Control Register 2, p. 1316, third paragraph.
+     */
+    gen_load_spr(t0, SPR_POWER_MMCR2);
+    tcg_gen_andi_tl(t0, t0, MMCR2_UREG_MASK);
+    tcg_gen_mov_tl(cpu_gpr[gprn], t0);
+
+    tcg_temp_free(t0);
+}
+
+void spr_write_MMCR2_ureg(DisasContext *ctx, int sprn, int gprn)
+{
+    if (!spr_groupA_write_allowed(ctx)) {
+        return;
+    }
+
+    spr_write_generic(ctx, SPR_POWER_MMCR2, gprn);
+}
 #else
 void spr_read_MMCR0_ureg(DisasContext *ctx, int gprn, int sprn)
 {
@@ -110,6 +146,16 @@ void spr_read_MMCR0_ureg(DisasContext *ctx, int gprn, int sprn)
 }
 
 void spr_write_MMCR0_ureg(DisasContext *ctx, int sprn, int gprn)
+{
+    spr_noaccess(ctx, gprn, sprn);
+}
+
+void spr_read_MMCR2_ureg(DisasContext *ctx, int gprn, int sprn)
+{
+    spr_read_ureg(ctx, gprn, sprn);
+}
+
+void spr_write_MMCR2_ureg(DisasContext *ctx, int sprn, int gprn)
 {
     spr_noaccess(ctx, gprn, sprn);
 }
