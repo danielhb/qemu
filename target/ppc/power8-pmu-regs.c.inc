@@ -132,6 +132,15 @@ void spr_write_MMCR0_ureg(DisasContext *ctx, int sprn, int gprn)
     tcg_temp_free(t0);
     tcg_temp_free(t1);
 }
+
+void spr_write_MMCR2_ureg(DisasContext *ctx, int sprn, int gprn)
+{
+    if (!spr_groupA_write_allowed(ctx)) {
+        return;
+    }
+
+    spr_write_generic(ctx, SPR_POWER_MMCR2, gprn);
+}
 #else
 void spr_read_MMCR0_ureg(DisasContext *ctx, int gprn, int sprn)
 {
@@ -144,6 +153,11 @@ void spr_read_MMCR2_ureg(DisasContext *ctx, int gprn, int sprn)
 }
 
 void spr_write_MMCR0_ureg(DisasContext *ctx, int sprn, int gprn)
+{
+    spr_noaccess(ctx, gprn, sprn);
+}
+
+void spr_write_MMCR2_ureg(DisasContext *ctx, int sprn, int gprn)
 {
     spr_noaccess(ctx, gprn, sprn);
 }
