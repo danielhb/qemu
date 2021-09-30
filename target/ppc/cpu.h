@@ -297,6 +297,19 @@ typedef struct ppc_v3_pate_t {
     uint64_t dw1;
 } ppc_v3_pate_t;
 
+/* PMU related structs */
+typedef enum {
+    PMU_EVENT_INVALID = 0,
+    PMU_EVENT_CYCLES,
+    PMU_EVENT_INSTRUCTIONS,
+    PMU_EVENT_INSN_RUN_LATCH,
+} PMUEventType;
+
+typedef struct PMUEvent {
+    int sprn;
+    PMUEventType type;
+} PMUEvent;
+
 /*****************************************************************************/
 /* Machine state register bits definition                                    */
 #define MSR_SF   63 /* Sixty-four-bit mode                            hflags */
@@ -1239,6 +1252,8 @@ struct CPUPPCState {
      * interrupts. All PMCs but PMC5 has a timer.
      */
     QEMUTimer *pmu_intr_timers[PMU_TIMERS_LEN];
+
+    PMUEvent pmu_events[6];
 };
 
 #define SET_FIT_PERIOD(a_, b_, c_, d_)          \

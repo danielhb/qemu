@@ -313,6 +313,25 @@ void cpu_ppc_pmu_timer_init(CPUPPCState *env)
                              cpu);
         env->pmu_intr_timers[i] = timer;
     }
+
+    /*
+     * PMC1 event first, PMC2 second and so on. PMC5 and PMC6
+     * PMUEvent are always the same regardless of MMCR1.
+     */
+    for (i = 0; i < 6; i++) {
+        PMUEvent pmu_event = env->pmu_events[i];
+
+        pmu_event.sprn = SPR_POWER_PMC1 + i;
+        pmu_event.type = PMU_EVENT_INVALID;
+
+        if (pmu_event.sprn == SPR_POWER_PMC5) {
+            pmu_event.type = PMU_EVENT_INSTRUCTIONS;
+        }
+
+        if (pmu_event.sprn == SPR_POWER_PMC6) {
+            pmu_event.type = PMU_EVENT_CYCLES;
+        }
+    }
 }
 
 void helper_store_mmcr0(CPUPPCState *env, target_ulong value)
