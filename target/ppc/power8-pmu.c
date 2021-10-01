@@ -147,16 +147,6 @@ void helper_store_mmcr1(CPUPPCState *env, uint64_t value)
     define_enabled_events(env);
 }
 
-static void update_PMC_PM_CYC(CPUPPCState *env, int sprn,
-                              uint64_t time_delta)
-{
-    /*
-     * The pseries and powernv clock runs at 1Ghz, meaning
-     * that 1 nanosec equals 1 cycle.
-     */
-    env->spr[sprn] += time_delta;
-}
-
 static uint8_t get_PMC_event(CPUPPCState *env, int sprn)
 {
     uint8_t evt_extr = 0;
@@ -194,50 +184,25 @@ static bool pmc_is_running(CPUPPCState *env, int sprn)
     return !(env->spr[SPR_POWER_MMCR0] & MMCR0_FC56);
 }
 
-static void update_programmable_PMC_reg(CPUPPCState *env, int sprn,
-                                        uint64_t time_delta)
-{
-    uint8_t event = get_PMC_event(env, sprn);
-
-    /*
-     * MMCR0_PMC1SEL = 0xF0 is the architected PowerISA v3.1 event
-     * that counts cycles using PMC1.
-     *
-     * IBM POWER chips also has support for an implementation dependent
-     * event, 0x1E, that enables cycle counting on PMCs 1-4. The
-     * Linux kernel makes extensive use of 0x1E, so let's also support
-     * it.
-     */
-    switch (event) {
-    case 0xF0:
-        if (sprn == SPR_POWER_PMC1) {
-            update_PMC_PM_CYC(env, sprn, time_delta);
-        }
-        break;
-    case 0x1E:
-        update_PMC_PM_CYC(env, sprn, time_delta);
-        break;
-    default:
-        return;
-    }
-}
-
-static void update_cycles_PMCs(CPUPPCState *env)
+static void pmu_events_update_cycles(CPUPPCState *env)
 {
     uint64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
     uint64_t time_delta = now - env->pmu_base_time;
-    bool PMC14_running = !(env->spr[SPR_POWER_MMCR0] & MMCR0_FC14);
-    bool PMC6_running = !(env->spr[SPR_POWER_MMCR0] & MMCR0_FC56);
-    int sprn;
+    int i;
 
-    if (PMC14_running) {
-        for (sprn = SPR_POWER_PMC1; sprn < SPR_POWER_PMC5; sprn++) {
-            update_programmable_PMC_reg(env, sprn, time_delta);
+    for (i = 0; i < 6; i++) {
+        PMUEvent *event = &env->pmu_events[i];
+
+        if (!pmu_event_is_active(env, event) ||
+            event->type != PMU_EVENT_CYCLES) {
+            continue;
         }
-    }
 
-    if (PMC6_running) {
-        update_PMC_PM_CYC(env, SPR_POWER_PMC6, time_delta);
+        /*
+         * The pseries and powernv clock runs at 1Ghz, meaning
+         * that 1 nanosec equals 1 cycle.
+         */
+        env->spr[event->sprn] += time_delta;
     }
 
     /*
@@ -406,7 +371,7 @@ static void fire_PMC_interrupt(PowerPCCPU *cpu)
         pmu_delete_timers(env);
     }
 
-    update_cycles_PMCs(env);
+    pmu_events_update_cycles(env);
 
     if (env->spr[SPR_POWER_MMCR0] & MMCR0_PMAE) {
         env->spr[SPR_POWER_MMCR0] &= ~MMCR0_PMAE;
@@ -482,7 +447,7 @@ void helper_store_mmcr0(CPUPPCState *env, target_ulong value)
      */
     if (curr_FC != new_FC) {
         if (!curr_FC) {
-            update_cycles_PMCs(env);
+            pmu_events_update_cycles(env);
         } else {
             start_cycle_count_session(env);
         }
@@ -507,7 +472,7 @@ void helper_store_mmcr0(CPUPPCState *env, target_ulong value)
         }
 
         /* Update the counter with the events counted so far */
-        update_cycles_PMCs(env);
+        pmu_events_update_cycles(env);
 
         start_cycle_count_session(env);
     }
@@ -541,7 +506,7 @@ void helper_store_pmc(CPUPPCState *env, uint32_t sprn, uint64_t value)
      * the new value of the PMC and start a new cycle count
      * session.
      */
-    update_cycles_PMCs(env);
+    pmu_events_update_cycles(env);
     env->spr[sprn] = value;
     start_cycle_count_session(env);
 }
