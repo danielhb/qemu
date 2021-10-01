@@ -23,6 +23,99 @@
 
 #if defined(TARGET_PPC64) && !defined(CONFIG_USER_ONLY)
 
+/*
+ * For PMCs 1-4, IBM POWER chips has support for an implementation
+ * dependent event, 0x1E, that enables cycle counting. The Linux kernel
+ * makes extensive use of 0x1E, so let's also support it.
+ *
+ * Likewise, event 0x2 is an implementation-dependent event that IBM
+ * POWER chips implement (at least since POWER8) that is equivalent to
+ * PM_INST_CMPL. Let's support this event on PMCs 1-4 as well.
+ */
+static void define_enabled_events(CPUPPCState *env)
+{
+    uint8_t pmc1sel, pmc2sel, pmc3sel, pmc4sel;
+    int i = 0;
+
+    /*
+     * PMC1 event. PMC1SEL = 0xF0 is the architected PowerISA v3.1
+     * event that counts cycles using PMC1. 0xFE is the PowerISA v3.1
+     * architected event to sample instructions using PMC1.
+     */
+    pmc1sel = extract64(env->spr[SPR_POWER_MMCR1], MMCR1_PMC1EVT_EXTR,
+                        MMCR1_EVT_SIZE);
+    switch (pmc1sel) {
+    case 0x1E:
+    case 0xF0:
+        env->pmu_events[i].type = PMU_EVENT_CYCLES;
+        break;
+    case 0x2:
+    case 0xFE:
+        env->pmu_events[i].type  = PMU_EVENT_INSTRUCTIONS;
+        break;
+    default:
+        env->pmu_events[i].type  = PMU_EVENT_INVALID;
+    }
+
+    /* PMC2 event */
+    i++;
+    pmc2sel = extract64(env->spr[SPR_POWER_MMCR1], MMCR1_PMC2EVT_EXTR,
+                        MMCR1_EVT_SIZE);
+    switch (pmc2sel) {
+    case 0x1E:
+        env->pmu_events[i].type = PMU_EVENT_CYCLES;
+        break;
+    case 0x2:
+        env->pmu_events[i].type = PMU_EVENT_INSTRUCTIONS;
+        break;
+    default:
+        env->pmu_events[i].type = PMU_EVENT_INVALID;
+    }
+
+    /* PMC3 event */
+    i++;
+    pmc3sel = extract64(env->spr[SPR_POWER_MMCR1], MMCR1_PMC3EVT_EXTR,
+                        MMCR1_EVT_SIZE);
+    switch (pmc3sel) {
+    case 0x1E:
+        env->pmu_events[i].type = PMU_EVENT_CYCLES;
+        break;
+    case 0x2:
+        env->pmu_events[i].type = PMU_EVENT_INSTRUCTIONS;
+        break;
+    default:
+        env->pmu_events[i].type = PMU_EVENT_INVALID;
+    }
+
+    /*
+     * PMC4 event. PMC4SEL = 0xFA is the "instructions completed
+     * with run latch set" event.
+     */
+    i++;
+    pmc4sel = extract64(env->spr[SPR_POWER_MMCR1], MMCR1_PMC4EVT_EXTR,
+                        MMCR1_EVT_SIZE);
+    switch (pmc4sel) {
+    case 0x1E:
+        env->pmu_events[i].type = PMU_EVENT_CYCLES;
+        break;
+    case 0x2:
+        env->pmu_events[i].type = PMU_EVENT_INSTRUCTIONS;
+        break;
+    case 0xFA:
+        env->pmu_events[i].type = PMU_EVENT_INSN_RUN_LATCH;
+        break;
+    default:
+        env->pmu_events[i].type = PMU_EVENT_INVALID;
+    }
+}
+
+void helper_store_mmcr1(CPUPPCState *env, uint64_t value)
+{
+    env->spr[SPR_POWER_MMCR1] = value;
+
+    define_enabled_events(env);
+}
+
 static void update_PMC_PM_CYC(CPUPPCState *env, int sprn,
                               uint64_t time_delta)
 {
