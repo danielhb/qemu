@@ -23,6 +23,8 @@
 
 #if defined(TARGET_PPC64) && !defined(CONFIG_USER_ONLY)
 
+#define COUNTER_NEGATIVE_VAL 0x80000000
+
 /*
  * For PMCs 1-4, IBM POWER chips has support for an implementation
  * dependent event, 0x1E, that enables cycle counting. The Linux kernel
@@ -34,79 +36,108 @@
  */
 static void define_enabled_events(CPUPPCState *env)
 {
-    uint8_t pmc1sel, pmc2sel, pmc3sel, pmc4sel;
-    int i = 0;
+    uint8_t mmcr1_evt_extr[] = { MMCR1_PMC1EVT_EXTR, MMCR1_PMC2EVT_EXTR,
+                                 MMCR1_PMC3EVT_EXTR, MMCR1_PMC4EVT_EXTR };
+    int i;
 
-    /*
-     * PMC1 event. PMC1SEL = 0xF0 is the architected PowerISA v3.1
-     * event that counts cycles using PMC1. 0xFE is the PowerISA v3.1
-     * architected event to sample instructions using PMC1.
-     */
-    pmc1sel = extract64(env->spr[SPR_POWER_MMCR1], MMCR1_PMC1EVT_EXTR,
-                        MMCR1_EVT_SIZE);
-    switch (pmc1sel) {
-    case 0x1E:
-    case 0xF0:
-        env->pmu_events[i].type = PMU_EVENT_CYCLES;
-        break;
-    case 0x2:
-    case 0xFE:
-        env->pmu_events[i].type  = PMU_EVENT_INSTRUCTIONS;
-        break;
-    default:
-        env->pmu_events[i].type  = PMU_EVENT_INVALID;
+    for (i = 0; i < 4; i++) {
+        uint8_t pmcsel = extract64(env->spr[SPR_POWER_MMCR1],
+                                   mmcr1_evt_extr[i],
+                                   MMCR1_EVT_SIZE);
+        PMUEvent *event = &env->pmu_events[i];
+
+        switch (pmcsel) {
+        case 0x2:
+            event->type = PMU_EVENT_INSTRUCTIONS;
+            break;
+        case 0x1E:
+            event->type = PMU_EVENT_CYCLES;
+            break;
+        case 0xF0:
+            /* PMC1SEL = 0xF0 is the architected PowerISA v3.1
+             * event that counts cycles using PMC1. */
+            if (event->sprn == SPR_POWER_PMC1) {
+                event->type = PMU_EVENT_CYCLES;
+            }
+            break;
+        case 0xFA:
+            /*
+             * PMC4SEL = 0xFA is the "instructions completed
+             * with run latch set" event.
+             */
+            if (event->sprn == SPR_POWER_PMC4) {
+                event->type = PMU_EVENT_INSN_RUN_LATCH;
+            }
+            break;
+        case 0xFE:
+            /* PMC1SEL = 0xFE is the architected PowerISA v3.1
+             * event to sample instructions using PMC1. */
+            if (event->sprn == SPR_POWER_PMC1) {
+                event->type = PMU_EVENT_INSTRUCTIONS;
+            }
+            break;
+        default:
+            event->type = PMU_EVENT_INVALID;
+        }
+    }
+}
+
+static bool pmu_event_is_active(CPUPPCState *env, PMUEvent *event)
+{
+    if (event->sprn < SPR_POWER_PMC5) {
+        return !(env->spr[SPR_POWER_MMCR0] & MMCR0_FC14);
     }
 
-    /* PMC2 event */
-    i++;
-    pmc2sel = extract64(env->spr[SPR_POWER_MMCR1], MMCR1_PMC2EVT_EXTR,
-                        MMCR1_EVT_SIZE);
-    switch (pmc2sel) {
-    case 0x1E:
-        env->pmu_events[i].type = PMU_EVENT_CYCLES;
-        break;
-    case 0x2:
-        env->pmu_events[i].type = PMU_EVENT_INSTRUCTIONS;
-        break;
-    default:
-        env->pmu_events[i].type = PMU_EVENT_INVALID;
+    return !(env->spr[SPR_POWER_MMCR0] & MMCR0_FC56);
+}
+
+static bool pmu_event_has_overflow_enabled(CPUPPCState *env, PMUEvent *event)
+{
+    if (event->sprn == SPR_POWER_PMC1) {
+        return env->spr[SPR_POWER_MMCR0] & MMCR0_PMC1CE;
     }
 
-    /* PMC3 event */
-    i++;
-    pmc3sel = extract64(env->spr[SPR_POWER_MMCR1], MMCR1_PMC3EVT_EXTR,
-                        MMCR1_EVT_SIZE);
-    switch (pmc3sel) {
-    case 0x1E:
-        env->pmu_events[i].type = PMU_EVENT_CYCLES;
-        break;
-    case 0x2:
-        env->pmu_events[i].type = PMU_EVENT_INSTRUCTIONS;
-        break;
-    default:
-        env->pmu_events[i].type = PMU_EVENT_INVALID;
+    return env->spr[SPR_POWER_MMCR0] & MMCR0_PMCjCE;
+}
+
+static bool pmu_event_counts_insns(PMUEvent *event)
+{
+    return event->type == PMU_EVENT_INSTRUCTIONS ||
+           event->type == PMU_EVENT_INSN_RUN_LATCH;
+}
+
+static bool pmu_events_increment_insns(CPUPPCState *env, uint32_t num_insns)
+{
+    bool overflow_triggered = false;
+    int i;
+
+    /* PMC6 never counts instructions. */
+    for (i = 0; i < 5; i++) {
+        PMUEvent *event = &env->pmu_events[i];
+
+        if (!pmu_event_is_active(env, event) ||
+            !pmu_event_counts_insns(event)) {
+            continue;
+        }
+
+        if (event->type == PMU_EVENT_INSTRUCTIONS) {
+            env->spr[event->sprn] += num_insns;
+        }
+
+        if (event->type == PMU_EVENT_INSN_RUN_LATCH &&
+            env->spr[SPR_CTRL] & CTRL_RUN) {
+            env->spr[event->sprn] += num_insns;
+        }
+
+        if (env->spr[event->sprn] >= COUNTER_NEGATIVE_VAL &&
+            pmu_event_has_overflow_enabled(env, event)) {
+
+            overflow_triggered = true;
+            env->spr[event->sprn] = COUNTER_NEGATIVE_VAL;
+        }
     }
 
-    /*
-     * PMC4 event. PMC4SEL = 0xFA is the "instructions completed
-     * with run latch set" event.
-     */
-    i++;
-    pmc4sel = extract64(env->spr[SPR_POWER_MMCR1], MMCR1_PMC4EVT_EXTR,
-                        MMCR1_EVT_SIZE);
-    switch (pmc4sel) {
-    case 0x1E:
-        env->pmu_events[i].type = PMU_EVENT_CYCLES;
-        break;
-    case 0x2:
-        env->pmu_events[i].type = PMU_EVENT_INSTRUCTIONS;
-        break;
-    case 0xFA:
-        env->pmu_events[i].type = PMU_EVENT_INSN_RUN_LATCH;
-        break;
-    default:
-        env->pmu_events[i].type = PMU_EVENT_INVALID;
-    }
+    return overflow_triggered;
 }
 
 void helper_store_mmcr1(CPUPPCState *env, uint64_t value)
@@ -125,8 +156,6 @@ static void update_PMC_PM_CYC(CPUPPCState *env, int sprn,
      */
     env->spr[sprn] += time_delta;
 }
-
-#define COUNTER_NEGATIVE_VAL 0x80000000
 
 static uint8_t get_PMC_event(CPUPPCState *env, int sprn)
 {
@@ -412,17 +441,17 @@ void cpu_ppc_pmu_timer_init(CPUPPCState *env)
      * PMUEvent are always the same regardless of MMCR1.
      */
     for (i = 0; i < 6; i++) {
-        PMUEvent pmu_event = env->pmu_events[i];
+        PMUEvent *event = &env->pmu_events[i];
 
-        pmu_event.sprn = SPR_POWER_PMC1 + i;
-        pmu_event.type = PMU_EVENT_INVALID;
+        event->sprn = SPR_POWER_PMC1 + i;
+        event->type = PMU_EVENT_INVALID;
 
-        if (pmu_event.sprn == SPR_POWER_PMC5) {
-            pmu_event.type = PMU_EVENT_INSTRUCTIONS;
+        if (event->sprn == SPR_POWER_PMC5) {
+            event->type = PMU_EVENT_INSTRUCTIONS;
         }
 
-        if (pmu_event.sprn == SPR_POWER_PMC6) {
-            pmu_event.type = PMU_EVENT_CYCLES;
+        if (event->sprn == SPR_POWER_PMC6) {
+            event->type = PMU_EVENT_CYCLES;
         }
     }
 }
@@ -484,75 +513,13 @@ void helper_store_mmcr0(CPUPPCState *env, target_ulong value)
     }
 }
 
-static bool pmc_counting_insns(CPUPPCState *env, int sprn,
-                               uint8_t event)
-{
-    bool ret = false;
-
-    if (!pmc_is_running(env, sprn)) {
-        return false;
-    }
-
-    if (sprn == SPR_POWER_PMC5) {
-        return true;
-    }
-
-    /*
-     * Event 0x2 is an implementation-dependent event that IBM
-     * POWER chips implement (at least since POWER8) that is
-     * equivalent to PM_INST_CMPL. Let's support this event on
-     * all programmable PMCs.
-     *
-     * Event 0xFE is the PowerISA v3.1 architected event to
-     * sample PM_INST_CMPL using PMC1.
-     */
-    switch (sprn) {
-    case SPR_POWER_PMC1:
-        return event == 0x2 || event == 0xFE;
-    case SPR_POWER_PMC2:
-    case SPR_POWER_PMC3:
-        return event == 0x2;
-    case SPR_POWER_PMC4:
-        /*
-         * Event 0xFA is the "instructions completed with run latch
-         * set" event. Consider it as instruction counting event.
-         * The caller is responsible for handling it separately
-         * from PM_INST_CMPL.
-         */
-        return event == 0x2 || event == 0xFA;
-    default:
-        break;
-    }
-
-    return ret;
-}
-
 /* This helper assumes that the PMC is running. */
 void helper_insns_inc(CPUPPCState *env, uint32_t num_insns)
 {
-    bool overflow_triggered = false;
+    bool overflow_triggered;
     PowerPCCPU *cpu;
-    int sprn;
 
-    for (sprn = SPR_POWER_PMC1; sprn <= SPR_POWER_PMC5; sprn++) {
-        uint8_t event = get_PMC_event(env, sprn);
-
-        if (pmc_counting_insns(env, sprn, event)) {
-            if (sprn == SPR_POWER_PMC4 && event == 0xFA) {
-                if (env->spr[SPR_CTRL] & CTRL_RUN) {
-                    env->spr[SPR_POWER_PMC4] += num_insns;
-                }
-            } else {
-                env->spr[sprn] += num_insns;
-            }
-
-            if (env->spr[sprn] >= COUNTER_NEGATIVE_VAL &&
-                pmc_counter_negative_enabled(env, sprn)) {
-                overflow_triggered = true;
-                env->spr[sprn] = COUNTER_NEGATIVE_VAL;
-            }
-        }
-    }
+    overflow_triggered = pmu_events_increment_insns(env, num_insns);
 
     if (overflow_triggered) {
         cpu = env_archcpu(env);

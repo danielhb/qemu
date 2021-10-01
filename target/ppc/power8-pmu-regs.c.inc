@@ -255,6 +255,12 @@ void spr_write_PMC56_ureg(DisasContext *ctx, int sprn, int gprn)
 void spr_write_MMCR1(DisasContext *ctx, int sprn, int gprn)
 {
     gen_helper_store_mmcr1(cpu_env, cpu_gpr[gprn]);
+
+    /*
+     * Writes in MMCR1 must force a new translation block, allowing
+     * the PMU to calculate events with more accuracy.
+     */
+    ctx->base.is_jmp = DISAS_EXIT_UPDATE;
 }
 #else
 void spr_read_MMCR0_ureg(DisasContext *ctx, int gprn, int sprn)
