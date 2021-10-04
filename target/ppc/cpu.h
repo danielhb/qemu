@@ -308,6 +308,9 @@ typedef enum {
 typedef struct PMUEvent {
     int sprn;
     PMUEventType type;
+
+    /* Timer used to fire performance monitor alerts  */
+    QEMUTimer *cycle_timer;
 } PMUEvent;
 
 /*****************************************************************************/
@@ -1246,12 +1249,6 @@ struct CPUPPCState {
      * running cycles.
      */
     uint64_t pmu_base_time;
-
-    /*
-     * Timers used to fire performance monitor alerts and
-     * interrupts. All PMCs but PMC5 has a timer.
-     */
-    QEMUTimer *pmu_intr_timers[PMU_TIMERS_LEN];
 
     PMUEvent pmu_events[6];
 };
