@@ -60,6 +60,15 @@ static void define_enabled_events(CPUPPCState *env)
                 event->type = PMU_EVENT_CYCLES;
             }
             break;
+        case 0xFA:
+            /*
+             * PMC4SEL = 0xFA is the "instructions completed
+             * with run latch set" event.
+             */
+            if (event->sprn == SPR_POWER_PMC4) {
+                event->type = PMU_EVENT_INSN_RUN_LATCH;
+            }
+            break;
         case 0xFE:
             /* PMC1SEL = 0xFE is the architected PowerISA v3.1
              * event to sample instructions using PMC1. */
@@ -106,13 +115,21 @@ static bool pmu_events_increment_insns(CPUPPCState *env, uint32_t num_insns)
     /* PMC6 never counts instructions. */
     for (i = 0; i < PMU_EVENTS_NUM - 1; i++) {
         PMUEvent *event = &env->pmu_events[i];
+        bool insn_event = event->type == PMU_EVENT_INSTRUCTIONS ||
+                          event->type == PMU_EVENT_INSN_RUN_LATCH;
 
-        if (!pmu_event_is_active(env, event) ||
-            event->type != PMU_EVENT_INSTRUCTIONS) {
+        if (!pmu_event_is_active(env, event) || !insn_event) {
             continue;
         }
 
-        env->spr[event->sprn] += num_insns;
+        if (event->type == PMU_EVENT_INSTRUCTIONS) {
+            env->spr[event->sprn] += num_insns;
+        }
+
+        if (event->type == PMU_EVENT_INSN_RUN_LATCH &&
+            env->spr[SPR_CTRL] & CTRL_RUN) {
+            env->spr[event->sprn] += num_insns;
+        }
 
         if (env->spr[event->sprn] >= COUNTER_NEGATIVE_VAL &&
             pmu_event_has_overflow_enabled(env, event)) {
