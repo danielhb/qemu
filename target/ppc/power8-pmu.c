@@ -98,6 +98,33 @@ static bool pmu_event_has_overflow_enabled(CPUPPCState *env, PMUEvent *event)
     return env->spr[SPR_POWER_MMCR0] & MMCR0_PMCjCE;
 }
 
+static bool pmu_events_increment_insns(CPUPPCState *env, uint32_t num_insns)
+{
+    bool overflow_triggered = false;
+    int i;
+
+    /* PMC6 never counts instructions. */
+    for (i = 0; i < PMU_EVENTS_NUM - 1; i++) {
+        PMUEvent *event = &env->pmu_events[i];
+
+        if (!pmu_event_is_active(env, event) ||
+            event->type != PMU_EVENT_INSTRUCTIONS) {
+            continue;
+        }
+
+        env->spr[event->sprn] += num_insns;
+
+        if (env->spr[event->sprn] >= COUNTER_NEGATIVE_VAL &&
+            pmu_event_has_overflow_enabled(env, event)) {
+
+            overflow_triggered = true;
+            env->spr[event->sprn] = COUNTER_NEGATIVE_VAL;
+        }
+    }
+
+    return overflow_triggered;
+}
+
 static void pmu_events_update_cycles(CPUPPCState *env)
 {
     uint64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
@@ -242,6 +269,20 @@ static void fire_PMC_interrupt(PowerPCCPU *cpu)
 
     /* PMC interrupt not implemented yet */
     return;
+}
+
+/* This helper assumes that the PMC is running. */
+void helper_insns_inc(CPUPPCState *env, uint32_t num_insns)
+{
+    bool overflow_triggered;
+    PowerPCCPU *cpu;
+
+    overflow_triggered = pmu_events_increment_insns(env, num_insns);
+
+    if (overflow_triggered) {
+        cpu = env_archcpu(env);
+        fire_PMC_interrupt(cpu);
+    }
 }
 
 static void cpu_ppc_pmu_timer_cb(void *opaque)
