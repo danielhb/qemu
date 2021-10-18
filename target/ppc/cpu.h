@@ -296,6 +296,26 @@ typedef struct ppc_v3_pate_t {
     uint64_t dw1;
 } ppc_v3_pate_t;
 
+/* PMU related structs and defines */
+#define PMU_EVENTS_NUM 6
+typedef enum {
+    PMU_EVENT_INVALID = 0,
+    PMU_EVENT_CYCLES,
+    PMU_EVENT_INSTRUCTIONS,
+} PMUEventType;
+
+typedef struct PMUEvent {
+    int sprn;
+    PMUEventType type;
+
+    /*
+     * Timer used to fire performance monitor alerts
+     * when counting cycles.
+     */
+    QEMUTimer *cyc_overflow_timer;
+
+} PMUEvent;
+
 /*****************************************************************************/
 /* Machine state register bits definition                                    */
 #define MSR_SF   63 /* Sixty-four-bit mode                            hflags */
@@ -1191,6 +1211,8 @@ struct CPUPPCState {
     uint32_t tm_vscr;
     uint64_t tm_dscr;
     uint64_t tm_tar;
+
+    PMUEvent pmu_events[PMU_EVENTS_NUM];
 };
 
 #define SET_FIT_PERIOD(a_, b_, c_, d_)          \
