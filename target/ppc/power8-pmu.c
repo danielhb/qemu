@@ -23,6 +23,8 @@
 
 #if defined(TARGET_PPC64) && !defined(CONFIG_USER_ONLY)
 
+#define COUNTER_NEGATIVE_VAL 0x80000000
+
 /*
  * For PMCs 1-4, IBM POWER chips has support for an implementation
  * dependent event, 0x1E, that enables cycle counting. The Linux kernel
@@ -91,6 +93,15 @@ static bool pmu_event_is_active(CPUPPCState *env, PMUEvent *event)
     return !(env->spr[SPR_POWER_MMCR0] & MMCR0_FC56);
 }
 
+static bool pmu_event_has_overflow_enabled(CPUPPCState *env, PMUEvent *event)
+{
+    if (event->sprn == SPR_POWER_PMC1) {
+        return env->spr[SPR_POWER_MMCR0] & MMCR0_PMC1CE;
+    }
+
+    return env->spr[SPR_POWER_MMCR0] & MMCR0_PMCjCE;
+}
+
 static void pmu_events_update_cycles(CPUPPCState *env)
 {
     uint64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
@@ -121,6 +132,52 @@ static void pmu_events_update_cycles(CPUPPCState *env)
     }
 }
 
+static void pmu_delete_timers(CPUPPCState *env)
+{
+    int i;
+
+    for (i = 0; i < PMU_EVENTS_NUM; i++) {
+        PMUEvent *event = &env->pmu_events[i];
+
+        if (event->sprn == SPR_POWER_PMC5) {
+            continue;
+        }
+
+        timer_del(event->cyc_overflow_timer);
+    }
+}
+
+static void pmu_events_start_overflow_timers(CPUPPCState *env)
+{
+    uint64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+    int64_t timeout;
+    int i;
+
+    env->pmu_base_time = now;
+
+    /*
+     * Scroll through all PMCs ad start counter overflow timers for
+     * PM_CYC events, if needed.
+     */
+    for (i = 0; i < PMU_EVENTS_NUM; i++) {
+        PMUEvent *event = &env->pmu_events[i];
+
+        if (!pmu_event_is_active(env, event) ||
+            !(event->type == PMU_EVENT_CYCLES) ||
+            !pmu_event_has_overflow_enabled(env, event)) {
+            continue;
+        }
+
+        if (env->spr[event->sprn] >= COUNTER_NEGATIVE_VAL) {
+            timeout =  0;
+        } else {
+            timeout  = COUNTER_NEGATIVE_VAL - env->spr[event->sprn];
+        }
+
+        timer_mod(event->cyc_overflow_timer, now + timeout);
+    }
+}
+
 /*
  * A cycle count session consists of the basic operations we
  * need to do to support PM_CYC events: redefine a new base_time
@@ -128,8 +185,22 @@ static void pmu_events_update_cycles(CPUPPCState *env)
  */
 static void start_cycle_count_session(CPUPPCState *env)
 {
-    /* Just define pmu_base_time for now */
-    env->pmu_base_time = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+    bool overflow_enabled = env->spr[SPR_POWER_MMCR0] &
+                            (MMCR0_PMC1CE | MMCR0_PMCjCE);
+
+    /*
+     * Always delete existing overflow timers when starting a
+     * new cycle counting session.
+     */
+    pmu_delete_timers(env);
+
+    if (!overflow_enabled) {
+        /* Define pmu_base_time and leave */
+        env->pmu_base_time = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+        return;
+    }
+
+    pmu_events_start_overflow_timers(env);
 }
 
 void helper_store_mmcr0(CPUPPCState *env, target_ulong value)
