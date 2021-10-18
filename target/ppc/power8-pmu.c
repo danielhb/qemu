@@ -23,6 +23,65 @@
 
 #if defined(TARGET_PPC64) && !defined(CONFIG_USER_ONLY)
 
+/*
+ * For PMCs 1-4, IBM POWER chips has support for an implementation
+ * dependent event, 0x1E, that enables cycle counting. The Linux kernel
+ * makes extensive use of 0x1E, so let's also support it.
+ *
+ * Likewise, event 0x2 is an implementation-dependent event that IBM
+ * POWER chips implement (at least since POWER8) that is equivalent to
+ * PM_INST_CMPL. Let's support this event on PMCs 1-4 as well.
+ */
+static void define_enabled_events(CPUPPCState *env)
+{
+    uint8_t mmcr1_evt_extr[] = { MMCR1_PMC1EVT_EXTR, MMCR1_PMC2EVT_EXTR,
+                                 MMCR1_PMC3EVT_EXTR, MMCR1_PMC4EVT_EXTR };
+    int i;
+
+    for (i = 0; i < 4; i++) {
+        uint8_t pmcsel = extract64(env->spr[SPR_POWER_MMCR1],
+                                   mmcr1_evt_extr[i],
+                                   MMCR1_EVT_SIZE);
+        PMUEvent *event = &env->pmu_events[i];
+
+        switch (pmcsel) {
+        case 0x2:
+            event->type = PMU_EVENT_INSTRUCTIONS;
+            break;
+        case 0x1E:
+            event->type = PMU_EVENT_CYCLES;
+            break;
+        case 0xF0:
+            /*
+             * PMC1SEL = 0xF0 is the architected PowerISA v3.1
+             * event that counts cycles using PMC1.
+             */
+            if (event->sprn == SPR_POWER_PMC1) {
+                event->type = PMU_EVENT_CYCLES;
+            }
+            break;
+        case 0xFE:
+            /*
+             * PMC1SEL = 0xFE is the architected PowerISA v3.1
+             * event to sample instructions using PMC1.
+             */
+            if (event->sprn == SPR_POWER_PMC1) {
+                event->type = PMU_EVENT_INSTRUCTIONS;
+            }
+            break;
+        default:
+            event->type = PMU_EVENT_INVALID;
+        }
+    }
+}
+
+void helper_store_mmcr1(CPUPPCState *env, uint64_t value)
+{
+    env->spr[SPR_POWER_MMCR1] = value;
+
+    define_enabled_events(env);
+}
+
 static void fire_PMC_interrupt(PowerPCCPU *cpu)
 {
     CPUPPCState *env = &cpu->env;
