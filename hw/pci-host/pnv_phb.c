@@ -89,6 +89,17 @@ static void pnv_phb_user_device_init(PnvPHB *phb)
         return;
     }
 
+    if (phb->version == 3) {
+        Pnv8Chip *chip8 = PNV8_CHIP(chip);
+
+        phb->chip = chip;
+
+        chip8->phbs[chip8->num_phbs] = phb;
+        chip8->num_phbs++;
+
+        parent = OBJECT(phb->chip);
+    }
+
     /*
      * Reparent user created devices to the chip to build
      * correctly the device tree. pnv_xscom_dt() needs every
