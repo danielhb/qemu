@@ -50,6 +50,34 @@ static void pnv_parent_bus_fixup(DeviceState *parent, DeviceState *child)
     }
 }
 
+static PnvPhb4PecState *pnv_phb4_get_pec(PnvChip *chip, PnvPHB4 *phb,
+                                         Error **errp)
+{
+    Pnv9Chip *chip9 = PNV9_CHIP(chip);
+    int chip_id = phb->chip_id;
+    int index = phb->phb_id;
+    int i, j;
+
+    for (i = 0; i < chip->num_pecs; i++) {
+        /*
+         * For each PEC, check the amount of phbs it supports
+         * and see if the given phb4 index matches an index.
+         */
+        PnvPhb4PecState *pec = &chip9->pecs[i];
+
+        for (j = 0; j < pec->num_phbs; j++) {
+            if (index == pnv_phb4_pec_get_phb_id(pec, j)) {
+                return pec;
+            }
+        }
+    }
+    error_setg(errp,
+               "pnv-phb4 chip-id %d index %d didn't match any existing PEC",
+               chip_id, index);
+
+    return NULL;
+}
+
 /*
  * Attach a root port device.
  *
@@ -99,6 +127,17 @@ static void pnv_phb_user_device_init(PnvPHB *phb)
         chip8->num_phbs++;
 
         parent = OBJECT(phb->chip);
+    } else {
+        Error *local_err = NULL;
+
+        phb->pec = pnv_phb4_get_pec(chip, PNV_PHB4(phb->backend), &local_err);
+
+        if (local_err) {
+            error_propagate(&error_fatal, local_err);
+            return;
+        }
+
+        parent = OBJECT(phb->pec);
     }
 
     /*
