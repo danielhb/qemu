@@ -329,6 +329,9 @@ static void pegasos2_machine_reset(MachineState *machine)
     g_free(pm->fdt_blob);
     pm->fdt_blob = fdt;
 
+    /* Set common MachineState->fdt */
+    machine->fdt = fdt;
+
     vof_build_dt(fdt, pm->vof);
     vof_client_open_store(fdt, pm->vof, "/chosen", "stdout", "/failsafe");
     pm->cpu->vhyp = PPC_VIRTUAL_HYPERVISOR(machine);
