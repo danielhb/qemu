@@ -1256,6 +1256,9 @@ target_ulong do_client_architecture_support(PowerPCCPU *cpu,
     spapr->fdt_initial_size = spapr->fdt_size;
     spapr->fdt_blob = fdt;
 
+    /* Set common MachineState->fdt */
+    MACHINE(spapr)->fdt = fdt;
+
     return H_SUCCESS;
 }
 
