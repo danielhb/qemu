@@ -26,6 +26,7 @@
 #include "hw/loader.h"
 #include "hw/boards.h"
 #include "qemu/config-file.h"
+#include "qemu/qemu-print.h"
 
 #include <libfdt.h>
 
@@ -660,4 +661,41 @@ void fdt_save(const char *filename, Error **errp)
     }
 
     error_setg(errp, "Error when saving machine FDT to file %s", filename);
+}
+
+static void fdt_print_node(int node, int depth)
+{
+    const struct fdt_property *prop = NULL;
+    const char *propname = NULL;
+    void *fdt = current_machine->fdt;
+    int padding = depth * 4;
+    int property = 0;
+    int prop_size;
+
+    qemu_printf("%*s%s {\n", padding, "", fdt_get_name(fdt, node, NULL));
+
+    padding += 4;
+
+    fdt_for_each_property_offset(property, fdt, node) {
+        prop = fdt_get_property_by_offset(fdt, property, &prop_size);
+        propname = fdt_string(fdt, fdt32_to_cpu(prop->nameoff));
+
+        qemu_printf("%*s%s;\n", padding, "", propname);
+    }
+
+    padding -= 4;
+    qemu_printf("%*s}\n", padding, "");
+}
+
+void fdt_info(const char *fullpath, Error **errp)
+{
+    int node;
+
+    node = fdt_path_offset(current_machine->fdt, fullpath);
+    if (node < 0) {
+        error_setg(errp, "node '%s' not found in FDT", fullpath);
+        return;
+    }
+
+    fdt_print_node(node, 0);
 }

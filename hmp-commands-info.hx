@@ -908,3 +908,16 @@ SRST
   ``stats``
     Show runtime-collected statistics
 ERST
+
+    {
+        .name       = "fdt",
+        .args_type  = "fullpath:s",
+        .params     = "fullpath",
+        .help       = "show firmware device tree node given its full path",
+        .cmd        = hmp_info_fdt,
+    },
+
+SRST
+  ``info fdt``
+    Show firmware device tree (fdt).
+ERST

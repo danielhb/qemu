@@ -124,6 +124,7 @@ int qemu_fdt_add_subnode(void *fdt, const char *name);
 int qemu_fdt_add_path(void *fdt, const char *path);
 
 void fdt_save(const char *filename, Error **errp);
+void fdt_info(const char *fullpath, Error **errp);
 
 #define qemu_fdt_setprop_cells(fdt, node_path, property, ...)                 \
     do {                                                                      \

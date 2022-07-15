@@ -973,6 +973,18 @@ static void hmp_info_capture(Monitor *mon, const QDict *qdict)
     }
 }
 
+static void hmp_info_fdt(Monitor *mon, const QDict *qdict)
+{
+    const char *fullpath = qdict_get_str(qdict, "fullpath");
+    Error *local_err = NULL;
+
+    fdt_info(fullpath, &local_err);
+
+    if (local_err) {
+        error_report_err(local_err);
+    }
+}
+
 static void hmp_stopcapture(Monitor *mon, const QDict *qdict)
 {
     int i;
