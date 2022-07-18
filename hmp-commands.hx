@@ -1768,3 +1768,16 @@ ERST
                       "\n\t\t\t -b to specify dirty bitmap as method of calculation)",
         .cmd        = hmp_calc_dirty_rate,
     },
+
+    {
+        .name       = "fdt-save",
+        .args_type  = "filename:s",
+        .params     = "[filename] file to save the FDT",
+        .help       = "save the FDT in the 'filename' file to be decoded using dtc",
+        .cmd        = hmp_fdt_save,
+    },
+
+SRST
+``fdt-save`` *filename*
+  Save the FDT in the 'filename' file to be decoded using dtc
+ERST

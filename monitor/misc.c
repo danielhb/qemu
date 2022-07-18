@@ -78,6 +78,7 @@
 #include "qapi/qmp-event.h"
 #include "sysemu/cpus.h"
 #include "qemu/cutils.h"
+#include "sysemu/device_tree.h"
 
 #if defined(TARGET_S390X)
 #include "hw/s390x/storage-keys.h"
@@ -933,6 +934,18 @@ static void hmp_boot_set(Monitor *mon, const QDict *qdict)
         error_report_err(local_err);
     } else {
         monitor_printf(mon, "boot device list now set to %s\n", bootdevice);
+    }
+}
+
+static void hmp_fdt_save(Monitor *mon, const QDict *qdict)
+{
+    const char *path = qdict_get_str(qdict, "filename");
+    Error *local_err = NULL;
+
+    fdt_save(path, &local_err);
+
+    if (local_err) {
+        error_report_err(local_err);
     }
 }
 
