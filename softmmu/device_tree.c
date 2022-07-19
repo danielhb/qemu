@@ -663,6 +663,24 @@ void fdt_save(const char *filename, Error **errp)
     error_setg(errp, "Error when saving machine FDT to file %s", filename);
 }
 
+static bool fdt_prop_is_string(const void *data, int size)
+{
+    const char *str = data;
+    int i;
+
+    if (size <= 0 || str[size - 1] != '\0') {
+        return false;
+    }
+
+    for (i = 0; i < size - 1; i++) {
+        if (!isprint(str[i])) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 static void fdt_print_node(int node, int depth)
 {
     const struct fdt_property *prop = NULL;
@@ -680,7 +698,11 @@ static void fdt_print_node(int node, int depth)
         prop = fdt_get_property_by_offset(fdt, property, &prop_size);
         propname = fdt_string(fdt, fdt32_to_cpu(prop->nameoff));
 
-        qemu_printf("%*s%s;\n", padding, "", propname);
+        if (fdt_prop_is_string(prop->data, prop_size)) {
+            qemu_printf("%*s%s = '%s'\n", padding, "", propname, prop->data);
+        } else {
+            qemu_printf("%*s%s;\n", padding, "", propname);
+        }
     }
 
     padding -= 4;
