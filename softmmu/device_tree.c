@@ -721,16 +721,24 @@ static void fdt_prop_print_val(const char *propname, const void *data,
     qemu_printf("]\n");
 }
 
-static void fdt_print_node(int node, int depth)
+static void fdt_print_node(int node, int depth, const char *fullpath)
 {
     const struct fdt_property *prop = NULL;
+    const char *nodename = NULL;
     const char *propname = NULL;
     void *fdt = current_machine->fdt;
     int padding = depth * 4;
     int property = 0;
+    int parent = node;
     int prop_size;
 
-    qemu_printf("%*s%s {\n", padding, "", fdt_get_name(fdt, node, NULL));
+    if (fullpath != NULL) {
+        nodename = fullpath;
+    } else {
+        nodename = fdt_get_name(fdt, node, NULL);
+    }
+
+    qemu_printf("%*s%s {\n", padding, "", nodename);
 
     padding += 4;
 
@@ -752,6 +760,10 @@ static void fdt_print_node(int node, int depth)
         }
     }
 
+    fdt_for_each_subnode(node, fdt, parent) {
+        fdt_print_node(node, depth + 1, NULL);
+    }
+
     padding -= 4;
     qemu_printf("%*s}\n", padding, "");
 }
@@ -766,5 +778,5 @@ void fdt_info(const char *fullpath, Error **errp)
         return;
     }
 
-    fdt_print_node(node, 0);
+    fdt_print_node(node, 0, fullpath);
 }
