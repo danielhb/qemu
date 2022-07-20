@@ -774,15 +774,86 @@ static void fdt_print_node(int node, int depth, const char *fullpath)
     qemu_printf("%*s}\n", padding, "");
 }
 
+static const struct fdt_property *fdt_find_property(const char *fullpath,
+                                                    int *prop_size,
+                                                    Error **errp)
+{
+    const struct fdt_property *prop = NULL;
+    void *fdt = current_machine->fdt;
+    g_autoptr(GString) nodename = NULL;
+    const char *propname = NULL;
+    int path_len = strlen(fullpath);
+    int node = 0; /* default to root node '/' */
+    int i, idx = -1;
+
+    /*
+     * We'll assume that we're dealing with a property. libfdt
+     * does not have an API to find a property given the full
+     * path, but it does have an API to find a property inside
+     * a node.
+     */
+    nodename = g_string_new("");
+
+    for (i = path_len - 1; i >= 0; i--) {
+        if (fullpath[i] == '/') {
+            idx = i;
+            break;
+        }
+    }
+
+    if (idx == -1) {
+        error_setg(errp, "FDT paths must contain at least one '/' character");
+        return NULL;
+    }
+
+    if (idx == path_len - 1) {
+        error_setg(errp, "FDT paths can't end with a '/' character");
+        return NULL;
+    }
+
+	propname = &fullpath[idx + 1];
+
+    if (idx != 0) {
+        g_string_append_len(nodename, fullpath, idx);
+
+        node = fdt_path_offset(fdt, nodename->str);
+        if (node < 0) {
+            error_setg(errp, "node '%s' of property '%s' not found in FDT",
+                       nodename->str, propname);
+            return NULL;
+        }
+    } else {
+        /* idx = 0 means that it's a property of the root node */
+        g_string_append(nodename, "/");
+    }
+
+    prop = fdt_get_property(fdt, node, propname, prop_size);
+    if (!prop) {
+        error_setg(errp, "property '%s' not found in node '%s' in FDT",
+                   propname, nodename->str);
+        return NULL;
+    }
+
+    return prop;
+}
+
 void fdt_info(const char *fullpath, Error **errp)
 {
-    int node;
+    const struct fdt_property *prop = NULL;
+    Error *local_err = NULL;
+    int node, prop_size;
 
     node = fdt_path_offset(current_machine->fdt, fullpath);
-    if (node < 0) {
-        error_setg(errp, "node '%s' not found in FDT", fullpath);
+    if (node >= 0) {
+        fdt_print_node(node, 0, fullpath);
         return;
     }
 
-    fdt_print_node(node, 0, fullpath);
+    prop = fdt_find_property(fullpath, &prop_size, &local_err);
+    if (local_err) {
+        error_propagate(errp, local_err);
+        return;
+    }
+
+    fdt_print_property(fullpath, prop->data, prop_size, 0);
 }
