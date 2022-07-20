@@ -721,6 +721,23 @@ static void fdt_prop_print_val(const char *propname, const void *data,
     qemu_printf("]\n");
 }
 
+static void fdt_print_property(const char *propname, const void *data,
+                               int prop_size, int padding)
+{
+    if (prop_size == 0) {
+        qemu_printf("%*s%s;\n", padding, "", propname);
+        return;
+    }
+
+    if (fdt_prop_is_string(data, prop_size)) {
+        qemu_printf("%*s%s = '%s'\n", padding, "", propname, (char *)data);
+    } else if (fdt_prop_is_uint32_array(prop_size)) {
+        fdt_prop_print_uint32_array(propname, data, prop_size, padding);
+    } else {
+        fdt_prop_print_val(propname, data, prop_size, padding);
+    }
+}
+
 static void fdt_print_node(int node, int depth, const char *fullpath)
 {
     const struct fdt_property *prop = NULL;
@@ -746,18 +763,7 @@ static void fdt_print_node(int node, int depth, const char *fullpath)
         prop = fdt_get_property_by_offset(fdt, property, &prop_size);
         propname = fdt_string(fdt, fdt32_to_cpu(prop->nameoff));
 
-        if (prop_size == 0) {
-            qemu_printf("%*s%s;\n", padding, "", propname);
-            continue;
-        }
-
-        if (fdt_prop_is_string(prop->data, prop_size)) {
-            qemu_printf("%*s%s = '%s'\n", padding, "", propname, (char *)prop->data);
-        } else if (fdt_prop_is_uint32_array(prop_size)) {
-            fdt_prop_print_uint32_array(propname, prop->data, prop_size, padding);
-        } else {
-            fdt_prop_print_val(propname, prop->data, prop_size, padding);
-        }
+        fdt_print_property(propname, prop->data, prop_size, padding);
     }
 
     fdt_for_each_subnode(node, fdt, parent) {
